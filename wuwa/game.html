@@ -311,12 +311,11 @@
             let newPos = char.position + steps;
             if (newPos >= TILES) {
                 newPos = TILES;
-                // 将该团子及其上方所有团子标记为完成
                 const stack = detachStack(char);
                 stack.forEach(c => c.finished = true);
                 placeStack(state, stack, TILES);
                 state.finished = true;
-                return; // 结束移动，不再触发特殊格子
+                return;
             }
             newPos = Math.min(TILES, Math.max(0, newPos));
             const charStack = detachStack(char);
@@ -367,7 +366,6 @@
             all.forEach(c => { if(!pmap[c.position]) pmap[c.position]=[]; pmap[c.position].push(c); });
             for(let p in pmap){
                 const arr = pmap[p];
-                // 尝试找出底部，如果找不到则直接按数组顺序绘制
                 let ordered = [];
                 const bottom = arr.find(c => c.stackedBelow === null);
                 if (bottom) {
@@ -699,6 +697,8 @@
                 clearInterval(tournament.raceStepTimer);
                 tournament.raceStepTimer = null;
                 document.getElementById('tournament-auto-btn').textContent = '自动播放';
+                // 立即绘制最终状态
+                drawRaceState(state, 'tournament-canvas');
                 finishCurrentMatch();
                 return;
             }
@@ -711,6 +711,8 @@
         function finishCurrentMatch() {
             const state = tournament.currentRaceState;
             const match = tournament.matches[tournament.currentMatchIdx];
+            // 再次确保最终画面绘制
+            drawRaceState(state, 'tournament-canvas');
             const ranking = getRanking(state).map(c => c.id);
             const existing = (match.type==='小组赛' && match.match===2) ? (tournament.promoted[match.group] || []) :
                              (match.group==='D' || match.group==='E') ? (match.match===2 ? (tournament.promoted[match.group] || []) : []) : [];
@@ -758,12 +760,18 @@
                 }
             }
 
-            // 构建完整排名播报
+            // 构建完整排名播报，包含“上轮晋级”标记
             const allRanked = ranking.map((id, idx) => {
                 const c = allCharacters.find(ch => ch.id === id);
                 const name = c ? c.name : id;
+                const alreadyPromoted = existing.includes(id);
                 const isPromoted = promoted.includes(id);
-                const status = match.advance > 0 ? (isPromoted ? '晋级' : '未晋级') : '';
+                let status = '';
+                if (match.advance > 0) {
+                    if (alreadyPromoted) status = '上轮晋级';
+                    else if (isPromoted) status = '晋级';
+                    else status = '未晋级';
+                }
                 return `第${idx+1}名：${name} 团子${status ? ' | ' + status : ''}`;
             }).join('<br>');
 
