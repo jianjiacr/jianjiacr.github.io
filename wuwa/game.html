@@ -208,7 +208,8 @@
             if (!bottom) return [];
             const stack = [];
             let cur = bottom;
-            while (cur) { stack.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; }
+            let safety = 0;
+            while (cur && safety < 100) { stack.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; safety++; }
             return stack;
         }
 
@@ -222,7 +223,8 @@
         function detachStack(char) {
             const stack = [];
             let cur = char;
-            while (cur) { stack.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; }
+            let safety = 0;
+            while (cur && safety < 100) { stack.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; safety++; }
             if (char.stackedBelow) char.stackedBelow.stackedAbove = [];
             stack.forEach(c => { c.stackedBelow = null; c.stackedAbove = []; });
             return stack;
@@ -241,7 +243,8 @@
             let h = 0, bottom = char.stackBottom;
             if (!bottom) return 1;
             let cur = bottom;
-            while (cur) { h++; if (cur === char) return h; cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; }
+            let safety = 0;
+            while (cur && safety < 100) { h++; if (cur === char) return h; cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; safety++; }
             return h;
         }
 
@@ -253,7 +256,6 @@
             });
         }
 
-        // 用于比赛结束后的最终排名（包括已完成的团子）
         function getFinalRanking(state) {
             const all = state.characters;
             return all.sort((a,b) => {
@@ -307,7 +309,8 @@
 
         function moveBu(state, bu, steps) {
             let remaining = steps;
-            while (remaining > 0) {
+            let safety = 0;
+            while (remaining > 0 && safety < 100) {
                 const nextPos = bu.position - 1;
                 if (nextPos < 0) break;
                 placeStack(state, detachStack(bu), nextPos);
@@ -317,12 +320,13 @@
                     const newPos = applySpecialTile(state, bu, nextPos);
                     if (newPos !== nextPos) break;
                 }
+                safety++;
             }
             state.characters.forEach(c => { if (c.position === bu.position && !c.finished) c.metBu = true; });
         }
 
         function moveNormal(state, char, steps) {
-            let newPos = char.position + steps;
+            let newPos = char.position + Math.max(0, steps);
             if (newPos >= TILES) {
                 newPos = TILES;
                 const stack = detachStack(char);
@@ -404,12 +408,14 @@
             } else if (char.id === 'dani' && char.lastDice === dice) {
                 steps += 2; skillMsg = '达妮娅连续相同';
             } else if (char.id === 'qianzhi') {
-                const finalDices = state.currentOrder.map(c => {
-                    if (c.id === 'moning') return [3,2,1][c.moningCycle % 3];
-                    if (c.id === 'shouan') return Math.random() < 0.5 ? 2 : 3;
-                    return state.currentDices[c.id];
-                });
-                if (dice === Math.min(...finalDices)) { steps += 2; skillMsg = '千咲最小点数'; }
+                try {
+                    const finalDices = (state.currentOrder || []).map(c => {
+                        if (c.id === 'moning') return [3,2,1][c.moningCycle % 3];
+                        if (c.id === 'shouan') return Math.random() < 0.5 ? 2 : 3;
+                        return (state.currentDices && state.currentDices[c.id]) ? state.currentDices[c.id] : 1;
+                    });
+                    if (finalDices.length && dice === Math.min(...finalDices)) { steps += 2; skillMsg = '千咲最小点数'; }
+                } catch (e) {}
             } else if (char.id === 'feixue' && char.metBu) {
                 steps += 1; skillMsg = '绯雪遇布大王+1';
             }
@@ -443,46 +449,49 @@
                 if (steps !== oldSteps) skillMsg = (skillMsg ? skillMsg + '；' : '') + '被西格莉卡标记，少前进1格';
             }
             char.lastDice = dice;
-            return { steps, skillMsg };
+            return { steps: Math.max(0, steps), skillMsg };
         }
 
         function drawRaceState(state, canvasId) {
-            const canvas = document.getElementById(canvasId);
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0,0,canvas.width,canvas.height);
-            const cw = (canvas.width-100)/33;
-            const y0 = 180;
-            for(let i=0;i<=32;i++){
-                const x=50+i*cw;
-                ctx.fillStyle='#1f2937'; ctx.fillRect(x,y0-20,cw-2,40);
-                ctx.fillStyle='#6b7280'; ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.fillText(i,x+cw/2,y0+5);
-                if(SPECIAL_TILES.rift.includes(i)){ ctx.fillStyle='#ef4444'; ctx.beginPath(); ctx.arc(x+cw/2,y0-30,8,0,2*Math.PI); ctx.fill(); }
-                if(SPECIAL_TILES.block.includes(i)){ ctx.fillStyle='#f59e0b'; ctx.fillText('◀',x+cw/2,y0-30); }
-                if(SPECIAL_TILES.boost.includes(i)){ ctx.fillStyle='#10b981'; ctx.fillText('▶',x+cw/2,y0-30); }
-            }
-            const all = [...state.characters, state.bu];
-            const pmap = {};
-            all.forEach(c => { if(!pmap[c.position]) pmap[c.position]=[]; pmap[c.position].push(c); });
-            for(let p in pmap){
-                const arr = pmap[p];
-                let ordered = [];
-                const bottom = arr.find(c => c.stackedBelow === null);
-                if (bottom) {
-                    let cur = bottom;
-                    while (cur) { ordered.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; }
-                } else {
-                    ordered = arr;
+            try {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                const cw = (canvas.width-100)/33;
+                const y0 = 180;
+                for(let i=0;i<=32;i++){
+                    const x=50+i*cw;
+                    ctx.fillStyle='#1f2937'; ctx.fillRect(x,y0-20,cw-2,40);
+                    ctx.fillStyle='#6b7280'; ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.fillText(i,x+cw/2,y0+5);
+                    if(SPECIAL_TILES.rift.includes(i)){ ctx.fillStyle='#ef4444'; ctx.beginPath(); ctx.arc(x+cw/2,y0-30,8,0,2*Math.PI); ctx.fill(); }
+                    if(SPECIAL_TILES.block.includes(i)){ ctx.fillStyle='#f59e0b'; ctx.fillText('◀',x+cw/2,y0-30); }
+                    if(SPECIAL_TILES.boost.includes(i)){ ctx.fillStyle='#10b981'; ctx.fillText('▶',x+cw/2,y0-30); }
                 }
-                ordered.forEach((c, idx) => {
-                    const x = 50 + p * cw + cw/2;
-                    const y = y0 - 60 - idx * 22;
-                    ctx.fillStyle = c.color;
-                    ctx.font = 'bold 16px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(c.short, x, y);
-                });
-            }
+                const all = [...state.characters, state.bu];
+                const pmap = {};
+                all.forEach(c => { if(!pmap[c.position]) pmap[c.position]=[]; pmap[c.position].push(c); });
+                for(let p in pmap){
+                    const arr = pmap[p];
+                    let ordered = [];
+                    const bottom = arr.find(c => c.stackedBelow === null);
+                    if (bottom) {
+                        let cur = bottom;
+                        let safety = 0;
+                        while (cur && safety < 100) { ordered.push(cur); cur = cur.stackedAbove.length > 0 ? cur.stackedAbove[0] : null; safety++; }
+                    } else {
+                        ordered = arr;
+                    }
+                    ordered.forEach((c, idx) => {
+                        const x = 50 + p * cw + cw/2;
+                        const y = y0 - 60 - idx * 22;
+                        ctx.fillStyle = c.color;
+                        ctx.font = 'bold 16px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(c.short, x, y);
+                    });
+                }
+            } catch (e) {}
         }
 
         // ================= 自由竞赛逻辑 =================
@@ -782,112 +791,140 @@
         }
 
         function finishCurrentMatch() {
-            const state = tournament.currentRaceState;
-            const match = tournament.matches[tournament.currentMatchIdx];
-            drawRaceState(state, 'tournament-canvas');
-            // 使用最终排名（包括已完成的团子）
-            const ranking = getFinalRanking(state).map(c => c.id);
-            const existing = (match.type==='小组赛' && match.match===2) ? (tournament.promoted[match.group] || []) :
-                             (match.group==='D' || match.group==='E') ? (match.match===2 ? (tournament.promoted[match.group] || []) : []) : [];
-            const promoted = [];
-            for (const id of ranking) {
-                if (promoted.length >= match.advance) break;
-                if (!existing.includes(id)) promoted.push(id);
-            }
-            match.result = { ranking, promoted };
+            try {
+                const state = tournament.currentRaceState;
+                const match = tournament.matches[tournament.currentMatchIdx];
+                drawRaceState(state, 'tournament-canvas');
+                const ranking = getFinalRanking(state).map(c => c.id);
+                const existing = (match.type==='小组赛' && match.match===2) ? (tournament.promoted[match.group] || []) :
+                                 (match.group==='D' || match.group==='E') ? (match.match===2 ? (tournament.promoted[match.group] || []) : []) : [];
+                const promoted = [];
+                for (const id of ranking) {
+                    if (promoted.length >= match.advance) break;
+                    if (!existing.includes(id)) promoted.push(id);
+                }
+                match.result = { ranking, promoted };
 
-            if (tournament.bet) {
-                const bet = tournament.bet;
-                const betAmount = Math.floor(tournament.coins * bet.ratio);
-                if (betAmount > 0) {
-                    const champion = ranking[0];
-                    if (bet.target === champion) {
-                        const winCoins = Math.floor(betAmount * parseFloat(tournament.odds[bet.target]));
-                        tournament.coins += winCoins - betAmount;
-                        tournament.winCount++;
-                    } else {
-                        const refund = Math.floor(betAmount * 0.8);
-                        tournament.coins = tournament.coins - betAmount + refund;
+                if (tournament.bet) {
+                    const bet = tournament.bet;
+                    const betAmount = Math.floor(tournament.coins * bet.ratio);
+                    if (betAmount > 0) {
+                        const champion = ranking[0];
+                        if (bet.target === champion) {
+                            const winCoins = Math.floor(betAmount * parseFloat(tournament.odds[bet.target]));
+                            tournament.coins += winCoins - betAmount;
+                            tournament.winCount++;
+                        } else {
+                            const refund = Math.floor(betAmount * 0.8);
+                            tournament.coins = tournament.coins - betAmount + refund;
+                        }
+                    }
+                    tournament.bet = null;
+                }
+                tournament.coins += 3000;
+                document.getElementById('coin-amount').textContent = tournament.coins;
+                document.getElementById('win-count').textContent = tournament.winCount;
+                updateProgress();
+
+                if (match.type === '小组赛') {
+                    if (!tournament.promoted[match.group]) tournament.promoted[match.group] = [];
+                    tournament.promoted[match.group].push(...promoted);
+                    if (match.match === 2) {
+                        const eliminated = match.chars.filter(c => !tournament.promoted[match.group].includes(c.id));
+                        tournament.eliminated.X = tournament.eliminated.X.concat(eliminated);
+                    }
+                } else if (match.group === 'D' || match.group === 'E') {
+                    if (!tournament.promoted[match.group]) tournament.promoted[match.group] = [];
+                    tournament.promoted[match.group].push(...promoted);
+                    if (match.match === 2) {
+                        const eliminated = match.chars.filter(c => !tournament.promoted[match.group].includes(c.id));
+                        tournament.eliminated.Y = tournament.eliminated.Y.concat(eliminated);
                     }
                 }
-                tournament.bet = null;
-            }
-            tournament.coins += 3000;
-            document.getElementById('coin-amount').textContent = tournament.coins;
-            document.getElementById('win-count').textContent = tournament.winCount;
-            updateProgress();
 
-            if (match.type === '小组赛') {
-                if (!tournament.promoted[match.group]) tournament.promoted[match.group] = [];
-                tournament.promoted[match.group].push(...promoted);
-                if (match.match === 2) {
-                    const eliminated = match.chars.filter(c => !tournament.promoted[match.group].includes(c.id));
-                    tournament.eliminated.X = tournament.eliminated.X.concat(eliminated);
+                const allRanked = ranking.map((id, idx) => {
+                    const c = allCharacters.find(ch => ch.id === id);
+                    const name = c ? c.name : id;
+                    const alreadyPromoted = existing.includes(id);
+                    const isPromoted = promoted.includes(id);
+                    let status = '';
+                    if (match.advance > 0) {
+                        if (alreadyPromoted) status = '上轮晋级';
+                        else if (isPromoted) status = '晋级';
+                        else status = '未晋级';
+                    }
+                    return `第${idx+1}名：${name} 团子${status ? ' | ' + status : ''}`;
+                }).join('<br>');
+
+                document.getElementById('tournament-result').innerHTML = allRanked;
+                document.getElementById('tournament-race-control').classList.add('hidden');
+
+                tournament.currentMatchIdx++;
+                if (tournament.currentMatchIdx < tournament.matches.length) {
+                    prepareNextMatch();
+                    const nextMatch = tournament.matches[tournament.currentMatchIdx];
+                    if (nextMatch && nextMatch.chars.length >= 6) {
+                        setupBet(nextMatch);
+                    } else {
+                        // 无法凑齐6个团子，提前结束锦标赛
+                        tournament.currentMatchIdx = tournament.matches.length;
+                        document.getElementById('final-win-count').textContent = `押注获胜次数：${tournament.winCount}`;
+                        document.getElementById('final-coin').textContent = `最终持有投注币：${tournament.coins}`;
+                        document.getElementById('final-result').classList.remove('hidden');
+                        document.getElementById('betting-panel').classList.add('hidden');
+                        document.getElementById('tournament-stage').textContent = '锦标赛提前结束 (人数不足)';
+                    }
+                } else {
+                    document.getElementById('final-win-count').textContent = `押注获胜次数：${tournament.winCount}`;
+                    document.getElementById('final-coin').textContent = `最终持有投注币：${tournament.coins}`;
+                    document.getElementById('final-result').classList.remove('hidden');
+                    document.getElementById('betting-panel').classList.add('hidden');
                 }
-            } else if (match.group === 'D' || match.group === 'E') {
-                if (!tournament.promoted[match.group]) tournament.promoted[match.group] = [];
-                tournament.promoted[match.group].push(...promoted);
-                if (match.match === 2) {
-                    const eliminated = match.chars.filter(c => !tournament.promoted[match.group].includes(c.id));
-                    tournament.eliminated.Y = tournament.eliminated.Y.concat(eliminated);
-                }
-            }
-
-            const allRanked = ranking.map((id, idx) => {
-                const c = allCharacters.find(ch => ch.id === id);
-                const name = c ? c.name : id;
-                const alreadyPromoted = existing.includes(id);
-                const isPromoted = promoted.includes(id);
-                let status = '';
-                if (match.advance > 0) {
-                    if (alreadyPromoted) status = '上轮晋级';
-                    else if (isPromoted) status = '晋级';
-                    else status = '未晋级';
-                }
-                return `第${idx+1}名：${name} 团子${status ? ' | ' + status : ''}`;
-            }).join('<br>');
-
-            document.getElementById('tournament-result').innerHTML = allRanked;
-            document.getElementById('tournament-race-control').classList.add('hidden');
-
-            tournament.currentMatchIdx++;
-            if (tournament.currentMatchIdx < tournament.matches.length) {
-                prepareNextMatch();
-                setupBet(tournament.matches[tournament.currentMatchIdx]);
-            } else {
-                document.getElementById('final-win-count').textContent = `押注获胜次数：${tournament.winCount}`;
-                document.getElementById('final-coin').textContent = `最终持有投注币：${tournament.coins}`;
+            } catch (e) {
+                // 出现严重错误，终止锦标赛
+                document.getElementById('final-win-count').textContent = '比赛出现错误，请刷新';
                 document.getElementById('final-result').classList.remove('hidden');
                 document.getElementById('betting-panel').classList.add('hidden');
+                clearInterval(tournament.raceStepTimer);
             }
         }
 
         function prepareNextMatch() {
             const next = tournament.matches[tournament.currentMatchIdx];
             if (next.chars.length > 0) return;
-            if (next.group === 'X') {
-                next.chars = tournament.eliminated.X.slice(0,6);
-            } else if (next.group === 'D') {
-                const allFirstMatchPromoted = [];
-                ['A','B','C'].forEach(g => {
-                    const arr = tournament.promoted[g] || [];
-                    if (arr.length >= 2) allFirstMatchPromoted.push(arr[0], arr[1]);
-                });
-                next.chars = allFirstMatchPromoted.slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
-            } else if (next.group === 'E') {
-                const allSecondMatchPromoted = [];
-                ['A','B','C'].forEach(g => {
-                    const arr = tournament.promoted[g] || [];
-                    if (arr.length >= 4) allSecondMatchPromoted.push(arr[2], arr[3]);
-                });
-                next.chars = allSecondMatchPromoted.slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
-            } else if (next.group === 'Y') {
-                next.chars = tournament.eliminated.Y.slice(0,6);
-            } else if (next.group === 'F') {
-                const dPromoted = tournament.promoted['D'] || [];
-                const ePromoted = tournament.promoted['E'] || [];
-                next.chars = [...dPromoted, ...ePromoted].slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
-            }
+            try {
+                if (next.group === 'X') {
+                    next.chars = tournament.eliminated.X.slice(0,6);
+                } else if (next.group === 'D') {
+                    const allFirstMatchPromoted = [];
+                    ['A','B','C'].forEach(g => {
+                        const arr = tournament.promoted[g] || [];
+                        if (arr.length >= 2) allFirstMatchPromoted.push(arr[0], arr[1]);
+                    });
+                    next.chars = allFirstMatchPromoted.slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
+                } else if (next.group === 'E') {
+                    const allSecondMatchPromoted = [];
+                    ['A','B','C'].forEach(g => {
+                        const arr = tournament.promoted[g] || [];
+                        if (arr.length >= 4) allSecondMatchPromoted.push(arr[2], arr[3]);
+                    });
+                    next.chars = allSecondMatchPromoted.slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
+                } else if (next.group === 'Y') {
+                    next.chars = tournament.eliminated.Y.slice(0,6);
+                } else if (next.group === 'F') {
+                    const dPromoted = tournament.promoted['D'] || [];
+                    const ePromoted = tournament.promoted['E'] || [];
+                    next.chars = [...dPromoted, ...ePromoted].slice(0,6).map(id => allCharacters.find(c => c.id === id)).filter(Boolean);
+                }
+                if (next.chars.length < 6) {
+                    // 如果不足6人，用已淘汰的团子补位（确保比赛正常进行）
+                    const allUsed = new Set(tournament.matches.flatMap(m => m.chars.map(c => c.id)));
+                    const remaining = allCharacters.filter(c => !allUsed.has(c.id));
+                    while (next.chars.length < 6 && remaining.length > 0) {
+                        next.chars.push(remaining.shift());
+                    }
+                }
+            } catch (e) {}
         }
 
         function setupBet(match) {
@@ -929,7 +966,15 @@
                 btn.textContent = '自动播放';
             } else {
                 btn.textContent = '停止';
-                tournament.raceStepTimer = setInterval(tournamentRaceNextStep, 200);
+                tournament.raceStepTimer = setInterval(() => {
+                    if (!tournament.currentRaceState || tournament.currentRaceState.finished) {
+                        clearInterval(tournament.raceStepTimer);
+                        tournament.raceStepTimer = null;
+                        document.getElementById('tournament-auto-btn').textContent = '自动播放';
+                        return;
+                    }
+                    tournamentRaceNextStep();
+                }, 200);
             }
         });
 
