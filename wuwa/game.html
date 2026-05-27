@@ -159,12 +159,12 @@
             { id: 'aimi', name: '爱弥斯团子', short: '爱', color: '#facc15', skill: '每场1次：经过中点后，若前方有非布团子，传送到最近团子顶端。' },
             { id: 'shouan', name: '守岸人团子', short: '守', color: '#4ade80', skill: '骰子只会掷出2或3。' },
             { id: 'kelai', name: '珂莱塔团子', short: '珂', color: '#fb7185', skill: '28%概率以骰子双倍点数前进。' },
-            { id: 'aogu', name: '奥古斯塔团子', short: '奥', color: '#e2e8f0', skill: '回合开始时若处于堆叠顶端，本回合不行动，下回合最后行动。' },
+            { id: 'aogu', name: '奥古斯塔团子', short: '奥', color: '#e2e8f0', skill: '行动时若处于堆叠顶端，本回合不行动，下回合最后行动。' },
             { id: 'younuo', name: '尤诺团子', short: '尤', color: '#94a3b8', skill: '每场1次：经过中点后，将前后其他非布团子传送至自己格子，保持排名顺序。' },
-            { id: 'fuluo', name: '弗洛洛团子', short: '弗', color: '#fdba74', skill: '回合开始时若处于堆叠底层，移动时额外前进3格。' },
+            { id: 'fuluo', name: '弗洛洛团子', short: '弗', color: '#fdba74', skill: '行动时若处于堆叠底层，移动时额外前进3格。' },
             { id: 'changli', name: '长离团子', short: '长', color: '#cbd5e1', skill: '下方有堆叠时，下回合65%概率最后一个行动。' },
             { id: 'jinxi', name: '今汐团子', short: '今', color: '#67e8f9', skill: '头顶有堆叠时，40%概率移动到所有团子最上方。' },
-            { id: 'kaka', name: '卡卡罗团子', short: '卡卡', color: '#d8b4fe', skill: '回合开始时若在最后一名，额外前进3格。' }
+            { id: 'kaka', name: '卡卡罗团子', short: '卡卡', color: '#d8b4fe', skill: '行动时若在最后一名，额外前进3格。' }
         ];
 
         const TILES = 32;
@@ -187,14 +187,18 @@
                 this.katiActivated = false;
                 this.aimiUsed = false;
                 this.aimiSkillPending = false;
-                this.fuluoExtra = false;
-                this.kakaExtra = false;
+                this.younuoUsed = false;
+                this.aoguSkip = false;        // 奥古斯塔本回合不行动
+                this.aoguLastNext = false;    // 奥古斯塔下回合最后行动
+                this.changliLastNext = false; // 长离下回合最后行动
+                this.jinxiChance = false;     // 今汐技能标记
             }
             get stackTop() { return this.stackedAbove.length > 0 ? this.stackedAbove[0] : this; }
             get stackBottom() { return this.stackedBelow ? this.stackedBelow.stackBottom : this; }
             get isBu() { return this.id === 'bu'; }
         }
 
+        // 堆叠辅助函数
         function getTileStack(state, pos) {
             const all = [...state.characters, state.bu];
             const atPos = all.filter(c => c.position === pos && !c.finished);
@@ -323,13 +327,18 @@
             applySpecialTile(state, char, newPos);
         }
 
+        // 爱弥斯：只传送自己
         function checkAimiSkill(state, char) {
             if (char.id !== 'aimi' || char.aimiUsed) return;
             if (char.position >= 16) {
                 const others = state.characters.filter(c => !c.finished && c.position > char.position && c.id !== 'bu');
                 if (others.length > 0) {
                     const nearest = others.reduce((a,b) => a.position < b.position ? a : b);
-                    placeStack(state, detachStack(char), nearest.position);
+                    // 只移动爱弥斯自己
+                    if (char.stackedBelow) char.stackedBelow.stackedAbove = [];
+                    char.stackedBelow = null;
+                    char.stackedAbove = [];
+                    placeStack(state, [char], nearest.position);
                     char.aimiUsed = true;
                     char.aimiSkillPending = false;
                     state.skillTriggers.push('爱弥斯团子传送到最近团子顶端');
@@ -344,6 +353,96 @@
                 kati.katiActivated = true;
                 state.skillTriggers.push('卡提希娅团子激活限定技');
             }
+        }
+
+        // 尤诺：经过中点后，将前后其他非布团子传送至自己格子，保持排名顺序
+        function checkYounuoSkill(state, char) {
+            if (char.id !== 'younuo' || char.younuoUsed) return;
+            if (char.position >= 16) {
+                const others = state.characters.filter(c => !c.finished && c.id !== 'bu' && c !== char);
+                if (others.length > 0) {
+                    const sorted = getRanking(state).filter(c => c.id !== 'bu' && c !== char);
+                    const targetPos = char.position;
+                    sorted.forEach(c => {
+                        if (c.stackedBelow) c.stackedBelow.stackedAbove = [];
+                        c.stackedBelow = null; c.stackedAbove = [];
+                        c.position = targetPos;
+                    });
+                    // 将 char 放到最顶端（保持排名顺序：越靠前的在越上方）
+                    sorted.push(char);
+                    setTileStack(state, targetPos, sorted.reverse());
+                    char.younuoUsed = true;
+                    state.skillTriggers.push('尤诺团子将其他团子传送至自己格子');
+                }
+            }
+        }
+
+        // 奥古斯塔、弗洛洛、卡卡罗在行动时判定
+        function getActualSteps(state, char, dice, allDices) {
+            let steps = dice;
+            let skillMsg = '';
+            if (char.id === 'moning') {
+                steps = [3,2,1][char.moningCycle % 3];
+                char.moningCycle++;
+                skillMsg = '莫宁固定点数';
+            } else if (char.id === 'shouan') {
+                steps = Math.random() < 0.5 ? 2 : 3;
+                skillMsg = '守岸人限定2/3';
+            } else if (char.id === 'linnai') {
+                const r = Math.random();
+                if (r < 0.6) { steps *= 2; skillMsg = '琳奈双倍'; }
+                else if (r < 0.8) { steps = 0; skillMsg = '琳奈无法移动'; }
+            } else if (char.id === 'kelai' && Math.random() < 0.28) {
+                steps *= 2; skillMsg = '珂莱塔双倍';
+            } else if (char.id === 'feibi' && Math.random() < 0.5) {
+                steps += 1; skillMsg = '菲比额外+1';
+            } else if (char.id === 'dani' && char.lastDice === dice) {
+                steps += 2; skillMsg = '达妮娅连续相同';
+            } else if (char.id === 'qianzhi') {
+                // 千咲：比较所有团子的最终骰值（已经过莫宁、守岸人修正）
+                const finalDices = state.currentOrder.map(c => {
+                    if (c.id === 'moning') return [3,2,1][c.moningCycle % 3];
+                    if (c.id === 'shouan') return Math.random() < 0.5 ? 2 : 3;
+                    return state.currentDices[c.id];
+                });
+                if (dice === Math.min(...finalDices)) { steps += 2; skillMsg = '千咲最小点数'; }
+            } else if (char.id === 'feixue' && char.metBu) {
+                steps += 1; skillMsg = '绯雪遇布大王+1';
+            }
+            // 弗洛洛、卡卡罗、奥古斯塔等行动时判定
+            if (char.id === 'fuluo' && char.stackedBelow === null && char.stackedAbove.length > 0) {
+                steps += 3; skillMsg = '弗洛洛底层+3';
+            }
+            if (char.id === 'kaka' && isLastPlace(state, char)) {
+                steps += 3; skillMsg = '卡卡罗最后一名+3';
+            }
+            if (char.id === 'aogu') {
+                if (char.stackedAbove.length === 0) {
+                    char.aoguSkip = true;
+                    char.aoguLastNext = true;
+                    skillMsg = '奥古斯塔顶端跳过本回合';
+                    steps = 0;
+                }
+            }
+            if (char.katiActivated && Math.random() < 0.6) {
+                steps += 2; skillMsg = '卡提希娅+2';
+            }
+            // 今汐
+            if (char.id === 'jinxi' && char.stackedAbove.length > 0 && Math.random() < 0.4) {
+                // 移到最上方：从堆叠中移除自己，放到顶端
+                detachStack(char);
+                const existing = getTileStack(state, char.position);
+                setTileStack(state, char.position, [...existing, char]);
+                skillMsg = '今汐移动到最上方';
+            }
+            if (char.marked) {
+                const oldSteps = steps;
+                steps = Math.max(1, steps - 1);
+                char.marked = false;
+                if (steps !== oldSteps) skillMsg = (skillMsg ? skillMsg + '；' : '') + '被西格莉卡标记，少前进1格';
+            }
+            char.lastDice = dice;
+            return { steps, skillMsg };
         }
 
         function drawRaceState(state, canvasId) {
@@ -442,11 +541,7 @@
             state.currentDices = dices;
             state.currentIdx = 0;
             state.skillTriggers = [];
-            state.characters.forEach(c => { c.fuluoExtra = false; c.kakaExtra = false; });
-            state.characters.forEach(c => {
-                if (c.id === 'fuluo' && c.stackedBelow === null && c.stackedAbove.length > 0) c.fuluoExtra = true;
-                if (c.id === 'kaka' && isLastPlace(state, c)) c.kakaExtra = true;
-            });
+            // 西格莉卡标记
             const xige = order.find(c => c.id === 'xige');
             if (xige && state.round > 1) {
                 const ranking = getRanking(state);
@@ -477,12 +572,12 @@
                     const active = state.characters.filter(c => !c.finished);
                     if (active.length > 0) {
                         const last = getRanking(state).pop();
-                        if (last && last.position > state.bu.position) {
+                        if (last && last.position > state.bu.position && last.stackTop === last) {
                             detachStack(state.bu);
                             state.bu.position = TILES;
                             state.bu.stackedBelow = null;
                             state.bu.stackedAbove = [];
-                            state.eventLog.push('布大王被所有团子超越，返回终点！');
+                            state.eventLog.push('布大王被超越且头上无人，返回终点！');
                         }
                     }
                 }
@@ -493,20 +588,14 @@
             }
             const char = state.currentOrder[state.currentIdx];
             const dice = state.currentDices[char.id];
-            let steps = dice, skillMsg = '';
-            if (char.id === 'moning') { steps = [3,2,1][char.moningCycle%3]; char.moningCycle++; skillMsg='莫宁固定点数'; }
-            else if (char.id === 'shouan') { steps = Math.random()<0.5?2:3; skillMsg='守岸人限定2/3'; }
-            else if (char.id === 'linnai') { const r=Math.random(); if(r<0.6){steps*=2;skillMsg='琳奈双倍';} else if(r<0.8){steps=0;skillMsg='琳奈无法移动';} }
-            else if (char.id === 'kelai' && Math.random()<0.28) { steps*=2; skillMsg='珂莱塔双倍'; }
-            else if (char.id === 'feibi' && Math.random()<0.5) { steps+=1; skillMsg='菲比额外+1'; }
-            else if (char.id === 'dani' && char.lastDice===dice) { steps+=2; skillMsg='达妮娅连续相同'; }
-            else if (char.id === 'qianzhi') { if(dice===Math.min(...Object.values(state.currentDices))){steps+=2;skillMsg='千咲最小点数';} }
-            else if (char.id === 'feixue' && char.metBu) { steps+=1; skillMsg='绯雪遇布大王+1'; }
-            else if (char.fuluoExtra) { steps+=3; skillMsg='弗洛洛底层+3'; }
-            else if (char.kakaExtra) { steps+=3; skillMsg='卡卡罗最后一名+3'; }
-            else if (char.katiActivated && Math.random()<0.6) { steps+=2; skillMsg='卡提希娅+2'; }
-            if (char.marked) { steps = Math.max(1, steps-1); char.marked = false; skillMsg += ' 被标记-1'; }
-            char.lastDice = dice;
+            const { steps, skillMsg } = getActualSteps(state, char, dice, state.currentDices);
+            if (char.id === 'aogu' && char.aoguSkip) {
+                state.eventLog.push(`${char.short} 跳过本回合`);
+                char.aoguSkip = false;
+                state.currentIdx++;
+                drawRaceState(state, 'free-canvas');
+                return;
+            }
             state.eventLog.push(`🎲 ${char.short} 掷出 ${dice}，前进 ${steps} 格${skillMsg?'（'+skillMsg+'）':''}`);
             if (skillMsg) state.skillTriggers.push(`${char.short}: ${skillMsg}`);
             if (char.isBu) moveBu(state, char, steps); else moveNormal(state, char, steps);
@@ -524,6 +613,7 @@
                 return;
             }
             checkAimiSkill(state, char);
+            checkYounuoSkill(state, char);
             state.currentIdx++;
             document.getElementById('action-hint').textContent = `行动：${char.short}（${state.currentIdx}/${state.currentOrder.length}）`;
             document.getElementById('free-skill-triggers').innerHTML = state.skillTriggers.slice().reverse().map(s => `• ${s}`).join('<br>') || '暂无';
@@ -631,18 +721,13 @@
             if (state.currentOrder.length === 0) {
                 const participants = [...state.characters.filter(c => !c.finished)];
                 if (state.round >= 3) participants.push(state.bu);
-                const order = shuffle(participants);
+                const order = participants.sort(() => Math.random() - 0.5);
                 const dices = {};
                 order.forEach(c => dices[c.id] = c.isBu ? Math.floor(Math.random()*6)+1 : Math.floor(Math.random()*3)+1);
                 state.currentOrder = order;
                 state.currentDices = dices;
                 state.currentIdx = 0;
                 state.skillTriggers = [];
-                state.characters.forEach(c => { c.fuluoExtra = false; c.kakaExtra = false; });
-                state.characters.forEach(c => {
-                    if (c.id === 'fuluo' && c.stackedBelow === null && c.stackedAbove.length > 0) c.fuluoExtra = true;
-                    if (c.id === 'kaka' && isLastPlace(state, c)) c.kakaExtra = true;
-                });
                 const xige = order.find(c => c.id === 'xige');
                 if (xige && state.round > 1) {
                     const ranking = getRanking(state);
@@ -660,16 +745,13 @@
                 state.currentOrder = [];
                 state.currentIdx = 0;
                 if (state.round >= 3) {
-                    const active = state.characters.filter(c => !c.finished);
-                    if (active.length > 0) {
-                        const last = getRanking(state).pop();
-                        if (last && last.position > state.bu.position) {
-                            detachStack(state.bu);
-                            state.bu.position = TILES;
-                            state.bu.stackedBelow = null;
-                            state.bu.stackedAbove = [];
-                            state.eventLog.push('布大王被超越，返回终点');
-                        }
+                    const last = getRanking(state).pop();
+                    if (last && last.position > state.bu.position && last.stackTop === last) {
+                        detachStack(state.bu);
+                        state.bu.position = TILES;
+                        state.bu.stackedBelow = null;
+                        state.bu.stackedAbove = [];
+                        state.eventLog.push('布大王被超越且头上无人，返回终点');
                     }
                 }
                 drawRaceState(state, 'tournament-canvas');
@@ -677,32 +759,26 @@
             }
             const char = state.currentOrder[state.currentIdx];
             const dice = state.currentDices[char.id];
-            let steps = dice, skillMsg = '';
-            if (char.id === 'moning') { steps = [3,2,1][char.moningCycle%3]; char.moningCycle++; skillMsg='莫宁固定点数'; }
-            else if (char.id === 'shouan') { steps = Math.random()<0.5?2:3; skillMsg='守岸人限定2/3'; }
-            else if (char.id === 'linnai') { const r=Math.random(); if(r<0.6){steps*=2;skillMsg='琳奈双倍';} else if(r<0.8){steps=0;skillMsg='琳奈无法移动';} }
-            else if (char.id === 'kelai' && Math.random()<0.28) { steps*=2; skillMsg='珂莱塔双倍'; }
-            else if (char.id === 'feibi' && Math.random()<0.5) { steps+=1; skillMsg='菲比额外+1'; }
-            else if (char.id === 'dani' && char.lastDice===dice) { steps+=2; skillMsg='达妮娅连续相同'; }
-            else if (char.id === 'qianzhi') { if(dice===Math.min(...Object.values(state.currentDices))){steps+=2;skillMsg='千咲最小点数';} }
-            else if (char.id === 'feixue' && char.metBu) { steps+=1; skillMsg='绯雪遇布大王+1'; }
-            else if (char.fuluoExtra) { steps+=3; skillMsg='弗洛洛底层+3'; }
-            else if (char.kakaExtra) { steps+=3; skillMsg='卡卡罗最后一名+3'; }
-            else if (char.katiActivated && Math.random()<0.6) { steps+=2; skillMsg='卡提希娅+2'; }
-            if (char.marked) { steps = Math.max(1, steps-1); char.marked = false; skillMsg += ' 被标记-1'; }
-            char.lastDice = dice;
+            const { steps, skillMsg } = getActualSteps(state, char, dice, state.currentDices);
+            if (char.id === 'aogu' && char.aoguSkip) {
+                state.eventLog.push(`${char.short} 跳过本回合`);
+                char.aoguSkip = false;
+                state.currentIdx++;
+                drawRaceState(state, 'tournament-canvas');
+                return;
+            }
             if (skillMsg) state.skillTriggers.push(`${char.short}: ${skillMsg}`);
             if (char.isBu) moveBu(state, char, steps); else moveNormal(state, char, steps);
             if (state.finished) {
                 clearInterval(tournament.raceStepTimer);
                 tournament.raceStepTimer = null;
                 document.getElementById('tournament-auto-btn').textContent = '自动播放';
-                // 立即绘制最终状态
                 drawRaceState(state, 'tournament-canvas');
                 finishCurrentMatch();
                 return;
             }
             checkAimiSkill(state, char);
+            checkYounuoSkill(state, char);
             state.currentIdx++;
             document.getElementById('t-skill-triggers').innerHTML = state.skillTriggers.slice().reverse().map(s => `• ${s}`).join('<br>') || '暂无';
             drawRaceState(state, 'tournament-canvas');
@@ -711,7 +787,6 @@
         function finishCurrentMatch() {
             const state = tournament.currentRaceState;
             const match = tournament.matches[tournament.currentMatchIdx];
-            // 再次确保最终画面绘制
             drawRaceState(state, 'tournament-canvas');
             const ranking = getRanking(state).map(c => c.id);
             const existing = (match.type==='小组赛' && match.match===2) ? (tournament.promoted[match.group] || []) :
@@ -760,7 +835,6 @@
                 }
             }
 
-            // 构建完整排名播报，包含“上轮晋级”标记
             const allRanked = ranking.map((id, idx) => {
                 const c = allCharacters.find(ch => ch.id === id);
                 const name = c ? c.name : id;
