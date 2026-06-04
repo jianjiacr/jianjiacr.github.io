@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>团子围城 · 双人对战</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            user-select: none;
+            flex-direction: column;
+            padding: 20px;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            max-width: 700px;
+            width: 100%;
+        }
+        canvas {
+            border: 3px solid #2a2a4a;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            background: #f5f0e1;
+            display: block;
+            touch-action: none;
+        }
+        .panels {
+            display: flex;
+            width: 100%;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .panel {
+            flex: 1 1 250px;
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 18px;
+            color: #e0e0e0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .panel h3 { margin-bottom: 12px; font-size: 1.2rem; color: #ffd966; }
+        .status-line { margin: 6px 0; font-size: 0.95rem; }
+        .rules { font-size: 0.85rem; line-height: 1.6; color: #ccc; }
+        .rules li { margin-bottom: 6px; }
+        .highlight { background: #facc15; color: #1a1a2e; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .button-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+        button {
+            background: #3a4a6b; border: none; color: white; padding: 10px 18px;
+            border-radius: 30px; font-size: 0.9rem; cursor: pointer; transition: 0.2s; font-weight: 600;
+        }
+        button:hover { background: #5a6b8b; transform: translateY(-1px); }
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+            z-index: 100; visibility: hidden;
+        }
+        .modal.active { visibility: visible; }
+        .modal-content {
+            background: #2a2a4a; border-radius: 24px; padding: 30px; text-align: center;
+            color: white; max-width: 400px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        }
+        .modal h2 { margin-bottom: 20px; font-size: 1.8rem; }
+        .modal button { margin: 8px; }
+    </style>
+</head>
+<body>
+<div class="game-container">
+    <canvas id="gameCanvas" width="420" height="420"></canvas>
+    <div class="panels">
+        <div class="panel" id="statusPanel">
+            <h3>📋 状态面板</h3>
+            <div class="status-line">👤 当前回合：<span id="turnDisplay">红方（女漂泊者）</span></div>
+            <div class="status-line">🎯 当前阶段：<span id="phaseDisplay" class="highlight">移动阶段</span></div>
+            <div class="status-line">📌 游戏状态：<span id="gameStateDisplay">游戏中（第1回合）</span></div>
+            <div class="status-line" id="skipMsg" style="color:#f39c12;"></div>
+            <div class="status-line" id="winnerDisplay" style="color:#ffb347;"></div>
+        </div>
+        <div class="panel">
+            <h3>📜 围城规则</h3>
+            <ul class="rules">
+                <li>1. 每回合移动1-3步后必须放一堵墙</li>
+                <li>2. 不穿墙、墙不越界、不踩对方棋子</li>
+                <li>3. 墙阻断所有通路即为游戏结束</li>
+                <li>4. 可达格子多者胜，相等则平局</li>
+                <li>5. 方向键/WASD移动光标，空格切换模式并确认，R退出放墙，ESC暂停</li>
+            </ul>
+        </div>
+    </div>
+    <div class="button-group">
+        <button id="resetBtn">🔄 重新开始</button>
+    </div>
+</div>
+
+<div class="modal" id="pauseModal">
+    <div class="modal-content">
+        <h2>⏸️ 游戏暂停</h2>
+        <button id="resumeBtn">▶ 继续游戏</button>
+        <button id="resetFromPauseBtn">🔄 重新开始</button>
+    </div>
+</div>
+
+<div class="modal" id="endModal">
+    <div class="modal-content">
+        <h2 id="endMessage">游戏结束</h2>
+        <div id="endStats" style="margin: 15px 0; font-size: 1rem;"></div>
+        <button id="closeEndBtn">确定</button>
+    </div>
+</div>
+
+<script>
+    (function() {
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const imgMale = new Image();
+        const imgFemale = new Image();
+        imgMale.src = './团子图片/漂泊者_男.png';
+        imgFemale.src = './团子图片/漂泊者_女.png';
+
+        const SIZE = 7;
+        const CELL = 60;
+        const BOARD_PX = SIZE * CELL;
+
+        const P1 = { row: 0, col: 0, name: '红方（女漂泊者）', img: imgFemale, color: '#e06c75' };
+        const P2 = { row: 6, col: 6, name: '蓝方（男漂泊者）', img: imgMale, color: '#61afef' };
+
+        let currentPlayer = P1;
+        let phase = 'move';
+        let round = 1;
+        let gameOver = false;
+        let winner = null;
+        let skipMessage = '';
+
+        let hWalls = Array(SIZE-1).fill().map(() => Array(SIZE).fill(false));
+        let vWalls = Array(SIZE).fill().map(() => Array(SIZE-1).fill(false));
+
+        let cursor = { row: 0, col: 0 };
+        let wallCursor = { row: 0, col: 0, dir: 'h' };
+        let validMoves = [];
+        let validWalls = [];
+
+        function isWallBetween(r1, c1, r2, c2) {
+            if (r1 === r2) { let minC = Math.min(c1, c2); return vWalls[r1][minC]; }
+            if (c1 === c2) { let minR = Math.min(r1, r2); return hWalls[minR][c1]; }
+            return false;
+        }
+
+        function canMoveTo(r1, c1, r2, c2) {
+            if (r2 < 0 || r2 >= SIZE || c2 < 0 || c2 >= SIZE) return false;
+            if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return false;
+            return !isWallBetween(r1, c1, r2, c2);
+        }
+
+        function getReachableCells(startRow, startCol, maxSteps, opponentPos) {
+            const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+            const queue = [[startRow, startCol, 0]];
+            visited[startRow][startCol] = true;
+            const cells = [];
+            while (queue.length) {
+                const [r, c, d] = queue.shift();
+                if (d > 0 && !(r === opponentPos.row && c === opponentPos.col)) cells.push({ row: r, col: c });
+                if (d < maxSteps) {
+                    for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                        let nr = r + dr, nc = c + dc;
+                        if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                            if (!(nr === opponentPos.row && nc === opponentPos.col)) {
+                                visited[nr][nc] = true;
+                                queue.push([nr, nc, d + 1]);
+                            }
+                        }
+                    }
+                }
+            }
+            return cells;
+        }
+
+        function isConnected(r1, c1, r2, c2) {
+            const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+            const queue = [[r1, c1]];
+            visited[r1][c1] = true;
+            while (queue.length) {
+                const [r, c] = queue.shift();
+                if (r === r2 && c === c2) return true;
+                for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                        if (!(nr === r2 && nc === c2) || (nr === r2 && nc === c2)) {
+                            visited[nr][nc] = true;
+                            queue.push([nr, nc]);
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function countRegion(row, col, excludePos = null) {
+            const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+            const queue = [[row, col]];
+            visited[row][col] = true;
+            let count = 0;
+            while (queue.length) {
+                const [r, c] = queue.shift();
+                count++;
+                for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                        if (excludePos && nr === excludePos.row && nc === excludePos.col) continue;
+                        visited[nr][nc] = true;
+                        queue.push([nr, nc]);
+                    }
+                }
+            }
+            return count;
+        }
+
+        // 获取某个玩家所在的完整区域（格子集合）
+        function getPlayerRegion(player, opponent) {
+            const set = new Set();
+            const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+            const queue = [[player.row, player.col]];
+            visited[player.row][player.col] = true;
+            while (queue.length) {
+                const [r, c] = queue.shift();
+                set.add(`${r},${c}`);
+                for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                        // 不进入对手棋子所在的格子
+                        if (nr === opponent.row && nc === opponent.col) continue;
+                        visited[nr][nc] = true;
+                        queue.push([nr, nc]);
+                    }
+                }
+            }
+            return set;
+        }
+
+        function wallPlacementValid(wallRow, wallCol, dir) {
+            if (dir === 'h') { if (hWalls[wallRow][wallCol]) return false; hWalls[wallRow][wallCol] = true; }
+            else { if (vWalls[wallRow][wallCol]) return false; vWalls[wallRow][wallCol] = true; }
+            const p1Region = countRegion(P1.row, P1.col, P2);
+            const p2Region = countRegion(P2.row, P2.col, P1);
+            if (dir === 'h') hWalls[wallRow][wallCol] = false;
+            else vWalls[wallRow][wallCol] = false;
+            return p1Region >= 1 && p2Region >= 1;
+        }
+
+        function getNeighborWalls(player) {
+            const r = player.row, c = player.col;
+            const candidates = [];
+            if (r > 0) candidates.push({ row: r-1, col: c, dir: 'h' });
+            if (r < SIZE-1) candidates.push({ row: r, col: c, dir: 'h' });
+            if (c > 0) candidates.push({ row: r, col: c-1, dir: 'v' });
+            if (c < SIZE-1) candidates.push({ row: r, col: c, dir: 'v' });
+            return candidates.filter(w => wallPlacementValid(w.row, w.col, w.dir));
+        }
+
+        function updateValidActions() {
+            const opponent = (currentPlayer === P1) ? P2 : P1;
+            validMoves = getReachableCells(currentPlayer.row, currentPlayer.col, 3, opponent);
+            validWalls = getNeighborWalls(currentPlayer);
+        }
+
+        function checkGameEnd() {
+            if (!isConnected(P1.row, P1.col, P2.row, P2.col)) {
+                gameOver = true;
+                const region1 = countRegion(P1.row, P1.col, P2);
+                const region2 = countRegion(P2.row, P2.col, P1);
+                if (region1 > region2) winner = 'P1';
+                else if (region2 > region1) winner = 'P2';
+                else winner = 'draw';
+                return true;
+            }
+            return false;
+        }
+
+        function switchPlayer(skipped = false) {
+            if (skipped) {
+                skipMessage = `${currentPlayer.name}因无法移动，跳过本次行动`;
+            } else {
+                skipMessage = '';
+            }
+            currentPlayer = (currentPlayer === P1) ? P2 : P1;
+            phase = 'move';
+            if (currentPlayer === P1) round++;
+            updateValidActions();
+            resetCursorToPlayer();
+            if (validMoves.length === 0) {
+                const other = (currentPlayer === P1) ? P2 : P1;
+                const otherMoves = getReachableCells(other.row, other.col, 3, currentPlayer);
+                if (otherMoves.length === 0) {
+                    gameOver = true;
+                    const r1 = countRegion(P1.row, P1.col, P2);
+                    const r2 = countRegion(P2.row, P2.col, P1);
+                    if (r1 > r2) winner = 'P1';
+                    else if (r2 > r1) winner = 'P2';
+                    else winner = 'draw';
+                } else {
+                    switchPlayer(true);
+                    return;
+                }
+            }
+            updateUI();
+            drawBoard();
+            if (gameOver) showEndModal();
+        }
+
+        function resetCursorToPlayer() {
+            cursor.row = currentPlayer.row;
+            cursor.col = currentPlayer.col;
+            wallCursor.row = currentPlayer.row;
+            wallCursor.col = currentPlayer.col;
+            wallCursor.dir = 'h';
+        }
+
+        function movePlayer(targetRow, targetCol) {
+            currentPlayer.row = targetRow;
+            currentPlayer.col = targetCol;
+            phase = 'wall';
+            updateValidActions();
+            if (validWalls.length === 0) {
+                gameOver = true;
+                winner = (currentPlayer === P1) ? 'P2' : 'P1';
+                updateUI();
+                showEndModal();
+                return;
+            }
+            updateUI();
+            drawBoard();
+        }
+
+        function placeWall(row, col, dir) {
+            if (dir === 'h') hWalls[row][col] = true;
+            else vWalls[row][col] = true;
+            if (checkGameEnd()) {
+                updateUI();
+                showEndModal();
+                return;
+            }
+            switchPlayer();
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
+
+            // 游戏结束时，获取双方区域集合
+            let p1RegionSet = new Set();
+            let p2RegionSet = new Set();
+            if (gameOver) {
+                p1RegionSet = getPlayerRegion(P1, P2);
+                p2RegionSet = getPlayerRegion(P2, P1);
+            }
+
+            // 绘制格子背景（根据区域染色）
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    let x = c * CELL, y = r * CELL;
+                    const key = `${r},${c}`;
+                    if (gameOver) {
+                        if (p1RegionSet.has(key)) {
+                            ctx.fillStyle = 'rgba(231, 76, 60, 0.25)'; // 浅红
+                        } else if (p2RegionSet.has(key)) {
+                            ctx.fillStyle = 'rgba(52, 152, 219, 0.25)'; // 浅蓝
+                        } else {
+                            ctx.fillStyle = '#faf3e0'; // 废弃格子保持原色
+                        }
+                    } else {
+                        ctx.fillStyle = '#faf3e0';
+                    }
+                    ctx.fillRect(x, y, CELL, CELL);
+                    ctx.strokeStyle = '#aaa';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, CELL, CELL);
+                }
+            }
+
+            // 已放置的墙 (红色)
+            ctx.strokeStyle = '#c0392b';
+            ctx.lineWidth = 5;
+            for (let r = 0; r < SIZE-1; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    if (hWalls[r][c]) {
+                        let y = (r+1) * CELL, x = c * CELL;
+                        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + CELL, y); ctx.stroke();
+                    }
+                }
+            }
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE-1; c++) {
+                    if (vWalls[r][c]) {
+                        let x = (c+1) * CELL, y = r * CELL;
+                        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + CELL); ctx.stroke();
+                    }
+                }
+            }
+
+            // 废弃区域红色叉叉（无主格子，游戏未结束也显示以提醒玩家）
+            if (!gameOver || gameOver) { // 始终显示废弃区域
+                const abandoned = new Set();
+                const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+                const playerPositions = new Set([`${P1.row},${P1.col}`, `${P2.row},${P2.col}`]);
+                for (let r = 0; r < SIZE; r++) {
+                    for (let c = 0; c < SIZE; c++) {
+                        if (visited[r][c] || playerPositions.has(`${r},${c}`)) continue;
+                        const regionCells = [];
+                        const queue = [[r, c]];
+                        visited[r][c] = true;
+                        let hasPlayer = false;
+                        while (queue.length) {
+                            const [cr, cc] = queue.shift();
+                            regionCells.push([cr, cc]);
+                            if (playerPositions.has(`${cr},${cc}`)) hasPlayer = true;
+                            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                                let nr = cr + dr, nc = cc + dc;
+                                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(cr, cc, nr, nc)) {
+                                    visited[nr][nc] = true;
+                                    queue.push([nr, nc]);
+                                }
+                            }
+                        }
+                        if (!hasPlayer) {
+                            regionCells.forEach(([rr, cc]) => abandoned.add(`${rr},${cc}`));
+                        }
+                    }
+                }
+                abandoned.forEach(key => {
+                    const [rr, cc] = key.split(',').map(Number);
+                    // 如果游戏结束且该格子属于某一方区域，则不画叉（但废弃格子不属于任何一方，所以安全）
+                    if (gameOver && (p1RegionSet.has(key) || p2RegionSet.has(key))) return;
+                    ctx.save();
+                    ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3;
+                    let x = cc * CELL, y = rr * CELL;
+                    ctx.beginPath();
+                    ctx.moveTo(x+10, y+10); ctx.lineTo(x+CELL-10, y+CELL-10);
+                    ctx.moveTo(x+CELL-10, y+10); ctx.lineTo(x+10, y+CELL-10);
+                    ctx.stroke();
+                    ctx.restore();
+                });
+            }
+
+            // 可移动格子高亮 (浅蓝)
+            if (phase === 'move' && !gameOver) {
+                ctx.fillStyle = 'rgba(173, 216, 230, 0.4)';
+                validMoves.forEach(m => ctx.fillRect(m.col * CELL, m.row * CELL, CELL, CELL));
+            }
+
+            // 放墙阶段：合法墙用普通黄色显示
+            if (phase === 'wall' && !gameOver) {
+                validWalls.forEach(w => {
+                    let x, y, wlen;
+                    if (w.dir === 'h') { y = (w.row+1)*CELL; x = w.col*CELL; wlen = CELL; }
+                    else { x = (w.col+1)*CELL; y = w.row*CELL; wlen = CELL; }
+                    ctx.save();
+                    ctx.strokeStyle = '#f1c40f';
+                    ctx.lineWidth = 5;
+                    ctx.beginPath();
+                    if (w.dir === 'h') { ctx.moveTo(x, y); ctx.lineTo(x+wlen, y); }
+                    else { ctx.moveTo(x, y); ctx.lineTo(x, y+wlen); }
+                    ctx.stroke();
+                    ctx.restore();
+                });
+            }
+
+            // 移动光标 (绿色框)
+            if (!gameOver && phase === 'move') {
+                ctx.save();
+                ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3;
+                let x = cursor.col * CELL, y = cursor.row * CELL;
+                ctx.strokeRect(x+2, y+2, CELL-4, CELL-4);
+                ctx.restore();
+            }
+
+            // 棋子
+            function drawPlayer(p) {
+                let x = p.col * CELL + CELL/2, y = p.row * CELL + CELL/2;
+                ctx.save();
+                ctx.beginPath(); ctx.arc(x, y, CELL/2.5, 0, 2*Math.PI); ctx.clip();
+                if (p.img.complete && p.img.naturalWidth > 0) {
+                    ctx.drawImage(p.img, x - CELL/2.5, y - CELL/2.5, CELL/1.25, CELL/1.25);
+                } else {
+                    ctx.fillStyle = p.color; ctx.fill();
+                }
+                ctx.restore();
+            }
+            drawPlayer(P1);
+            drawPlayer(P2);
+        }
+
+        function updateUI() {
+            document.getElementById('turnDisplay').textContent = currentPlayer.name;
+            document.getElementById('phaseDisplay').textContent = phase === 'move' ? '移动阶段' : '放墙阶段';
+            document.getElementById('gameStateDisplay').textContent = gameOver ? '结束' : `游戏中（第${round}回合）`;
+            document.getElementById('skipMsg').textContent = skipMessage;
+            if (gameOver) {
+                if (winner === 'P1') document.getElementById('winnerDisplay').textContent = '🏆 红方（女漂泊者）胜利！';
+                else if (winner === 'P2') document.getElementById('winnerDisplay').textContent = '🏆 蓝方（男漂泊者）胜利！';
+                else document.getElementById('winnerDisplay').textContent = '🤝 双方平局！';
+            } else {
+                document.getElementById('winnerDisplay').textContent = '';
+            }
+        }
+
+        function showEndModal() {
+            const modal = document.getElementById('endModal');
+            modal.classList.add('active');
+            let msg = '';
+            if (winner === 'P1') msg = '红方（女漂泊者）胜利！';
+            else if (winner === 'P2') msg = '蓝方（男漂泊者）胜利！';
+            else msg = '双方平局！';
+            document.getElementById('endMessage').textContent = '游戏结束 · ' + msg;
+            const r1 = countRegion(P1.row, P1.col, P2);
+            const r2 = countRegion(P2.row, P2.col, P1);
+            document.getElementById('endStats').innerHTML = `红方（女漂泊者）占有格子数：${r1}<br>蓝方（男漂泊者）占有格子数：${r2}`;
+        }
+
+        function resetGame() {
+            P1.row = 0; P1.col = 0;
+            P2.row = 6; P2.col = 6;
+            currentPlayer = P1; phase = 'move'; round = 1; gameOver = false; winner = null; skipMessage = '';
+            hWalls = Array(SIZE-1).fill().map(() => Array(SIZE).fill(false));
+            vWalls = Array(SIZE).fill().map(() => Array(SIZE-1).fill(false));
+            updateValidActions();
+            resetCursorToPlayer();
+            updateUI();
+            document.getElementById('endModal').classList.remove('active');
+            document.getElementById('pauseModal').classList.remove('active');
+            drawBoard();
+        }
+
+        function handleMoveConfirm() {
+            if (phase !== 'move' || gameOver) return;
+            const target = validMoves.find(m => m.row === cursor.row && m.col === cursor.col);
+            if (target) { movePlayer(target.row, target.col); drawBoard(); }
+        }
+
+        function handleWallConfirm() {
+            if (phase !== 'wall' || gameOver) return;
+            const w = validWalls.find(v => v.row === wallCursor.row && v.col === wallCursor.col && v.dir === wallCursor.dir);
+            if (w) { placeWall(w.row, w.col, w.dir); drawBoard(); }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameOver) return;
+            const key = e.key;
+            e.preventDefault();
+            if (key === 'Escape') { document.getElementById('pauseModal').classList.add('active'); return; }
+            if (phase === 'move') {
+                if (key === 'ArrowUp' || key === 'w' || key === 'W') cursor.row = Math.max(0, cursor.row - 1);
+                else if (key === 'ArrowDown' || key === 's' || key === 'S') cursor.row = Math.min(SIZE-1, cursor.row + 1);
+                else if (key === 'ArrowLeft' || key === 'a' || key === 'A') cursor.col = Math.max(0, cursor.col - 1);
+                else if (key === 'ArrowRight' || key === 'd' || key === 'D') cursor.col = Math.min(SIZE-1, cursor.col + 1);
+                else if (key === ' ') { handleMoveConfirm(); return; }
+                drawBoard();
+            } else if (phase === 'wall') {
+                if (key === 'r' || key === 'R') { phase = 'move'; updateUI(); drawBoard(); return; }
+                if (key === 'ArrowUp' || key === 'w' || key === 'W') {
+                    wallCursor.row = Math.max(0, wallCursor.row - 1);
+                } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
+                    if (wallCursor.dir === 'h') wallCursor.row = Math.min(SIZE-2, wallCursor.row + 1);
+                    else wallCursor.row = Math.min(SIZE-1, wallCursor.row + 1);
+                } else if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
+                    wallCursor.col = Math.max(0, wallCursor.col - 1);
+                } else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
+                    if (wallCursor.dir === 'h') wallCursor.col = Math.min(SIZE-1, wallCursor.col + 1);
+                    else wallCursor.col = Math.min(SIZE-2, wallCursor.col + 1);
+                } else if (key === ' ') { handleWallConfirm(); return; }
+                else if (key === 'Tab') { wallCursor.dir = wallCursor.dir === 'h' ? 'v' : 'h'; }
+                drawBoard();
+            }
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = BOARD_PX / rect.width, scaleY = BOARD_PX / rect.height;
+            const mouseX = (e.clientX - rect.left) * scaleX, mouseY = (e.clientY - rect.top) * scaleY;
+            const col = Math.floor(mouseX / CELL), row = Math.floor(mouseY / CELL);
+            if (col < 0 || col >= SIZE || row < 0 || row >= SIZE) return;
+            if (phase === 'move') {
+                const target = validMoves.find(m => m.row === row && m.col === col);
+                if (target) { movePlayer(row, col); drawBoard(); }
+            } else if (phase === 'wall') {
+                const xInCell = mouseX - col * CELL, yInCell = mouseY - row * CELL;
+                const threshold = 12;
+                let dir = null, wr = row, wc = col;
+                if (yInCell < threshold && row > 0) { dir = 'h'; wr = row-1; wc = col; }
+                else if (yInCell > CELL - threshold && row < SIZE-1) { dir = 'h'; wr = row; wc = col; }
+                else if (xInCell < threshold && col > 0) { dir = 'v'; wr = row; wc = col-1; }
+                else if (xInCell > CELL - threshold && col < SIZE-1) { dir = 'v'; wr = row; wc = col; }
+                if (dir) {
+                    const valid = validWalls.find(v => v.row === wr && v.col === wc && v.dir === dir);
+                    if (valid) { placeWall(wr, wc, dir); drawBoard(); }
+                }
+            }
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', resetGame);
+        document.getElementById('resumeBtn').addEventListener('click', () => document.getElementById('pauseModal').classList.remove('active'));
+        document.getElementById('resetFromPauseBtn').addEventListener('click', resetGame);
+        document.getElementById('closeEndBtn').addEventListener('click', () => {
+            document.getElementById('endModal').classList.remove('active');
+        });
+
+        updateValidActions();
+        resetCursorToPlayer();
+        updateUI();
+        drawBoard();
+    })();
+</script>
+</body>
+</html>
