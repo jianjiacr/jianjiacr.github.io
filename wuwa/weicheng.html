@@ -70,9 +70,13 @@
         .modal-content {
             background: #2a2a4a; border-radius: 24px; padding: 30px; text-align: center;
             color: white; max-width: 400px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            max-height: 80vh; overflow-y: auto;
         }
         .modal h2 { margin-bottom: 20px; font-size: 1.8rem; }
         .modal button { margin: 8px; }
+        .score-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.9rem; }
+        .score-table th, .score-table td { padding: 6px 10px; border-bottom: 1px solid #555; text-align: center; }
+        .score-table th { color: #ffd966; }
     </style>
 </head>
 <body>
@@ -87,11 +91,12 @@
 
 <!-- 难度选择 -->
 <div id="difficulty-screen" class="modal" style="visibility:hidden">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width:450px">
         <h2>🤖 选择电脑难度</h2>
-        <button id="easyBtn">😊 初级</button>
-        <button id="mediumBtn">😐 中级</button>
-        <button id="hardBtn">😈 高级</button>
+        <button id="diff1Btn">📘 初窥门径<br><small>刚刚踏入围城门槛（电脑立刻落子）</small></button>
+        <button id="diff2Btn">📗 循序渐进<br><small>围城规则烂熟于心（电脑有时需要深度思考）</small></button>
+        <button id="diff3Btn">📙 渐入佳境<br><small>对局练就敏锐棋感（电脑常常需要深度思考）</small></button>
+        <button id="diff4Btn">📕 炉火纯青<br><small>博弈思路融会贯通（电脑每一步都深思熟虑）</small></button>
     </div>
 </div>
 
@@ -142,6 +147,15 @@
     </div>
 </div>
 
+<!-- 分数报告 -->
+<div class="modal" id="scoreModal">
+    <div class="modal-content" style="max-width:500px">
+        <h2>📊 比赛数据（仅用于调试）</h2>
+        <div id="scoreContent"></div>
+        <button id="closeScoreBtn">确定</button>
+    </div>
+</div>
+
 <script>
 (function() {
     const canvas = document.getElementById('gameCanvas');
@@ -156,8 +170,8 @@
     const P1 = { row: 0, col: 0, name: '红方（女漂泊者）', img: imgFemale, color: '#e06c75' };
     const P2 = { row: 6, col: 6, name: '蓝方（男漂泊者）', img: imgMale, color: '#61afef' };
 
-    let gameMode = 'pvp';          // 'pvp' 或 'ai'
-    let aiDifficulty = 'medium';   // 'easy','medium','hard'
+    let gameMode = 'pvp';
+    let aiDifficulty = 'beginner';
     let currentPlayer = P1;
     let phase = 'move';
     let round = 1;
@@ -172,6 +186,8 @@
     let cursor = { row: 0, col: 0 };
     let wallCursor = null;
     let validMoves = [], validWalls = [];
+
+    let scoreHistory = [];
 
     // ---------- 基础函数 ----------
     function isWallBetween(r1, c1, r2, c2) {
@@ -306,12 +322,40 @@
         return false;
     }
 
+    function evaluateForPlayer(player) {
+        const opp = (player === P1) ? P2 : P1;
+        const myRegion = countRegion(player.row, player.col, opp);
+        const oppRegion = countRegion(opp.row, opp.col, player);
+        if (!isConnected(player.row, player.col, opp.row, opp.col)) {
+            return myRegion > oppRegion ? 10000 : -10000;
+        }
+        let score = 0;
+        score += (myRegion - oppRegion) * 15;
+        const myMoves = getReachableCells(player.row, player.col, 3, opp).length;
+        const oppMoves = getReachableCells(opp.row, opp.col, 3, player).length;
+        score += (myMoves - oppMoves) * 3;
+        const dist = Math.abs(player.row - opp.row) + Math.abs(player.col - opp.col);
+        score -= Math.max(0, dist - 3) * 2;
+        const centerDist = Math.abs(player.row - 3) + Math.abs(player.col - 3);
+        score -= centerDist * 1.5;
+        if (player.row === 0 || player.row === SIZE-1) score -= 5;
+        if (player.col === 0 || player.col === SIZE-1) score -= 5;
+        if (opp.row === 0 || opp.row === SIZE-1) score += 5;
+        if (opp.col === 0 || opp.col === SIZE-1) score += 5;
+        return score;
+    }
+
     function switchPlayer(skipped = false) {
         if (skipped) skipMessage = `${currentPlayer.name}因无法移动，跳过本次行动`;
         else skipMessage = '';
         currentPlayer = (currentPlayer === P1) ? P2 : P1;
         phase = 'move';
-        if (currentPlayer === P1) round++;
+        if (currentPlayer === P1) {
+            round++;
+            const p1Score = evaluateForPlayer(P1);
+            const p2Score = evaluateForPlayer(P2);
+            scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
+        }
         updateValidActions();
         resetCursorToPlayer();
         if (validMoves.length === 0) {
@@ -324,6 +368,11 @@
                 if (r1 > r2) winner = 'P1';
                 else if (r2 > r1) winner = 'P2';
                 else winner = 'draw';
+                if (currentPlayer === P1) {
+                    const p1Score = evaluateForPlayer(P1);
+                    const p2Score = evaluateForPlayer(P2);
+                    scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
+                }
             } else {
                 switchPlayer(true);
                 return;
@@ -383,7 +432,6 @@
         ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 5;
         for (let r = 0; r < SIZE-1; r++) for (let c = 0; c < SIZE; c++) if (hWalls[r][c]) { let y = (r+1)*CELL, x = c*CELL; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+CELL,y); ctx.stroke(); }
         for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE-1; c++) if (vWalls[r][c]) { let x = (c+1)*CELL, y = r*CELL; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+CELL); ctx.stroke(); }
-        // 废弃区域
         const abandoned = new Set();
         const visited = Array(SIZE).fill().map(()=>Array(SIZE).fill(false));
         const playerPositions = new Set([`${P1.row},${P1.col}`,`${P2.row},${P2.col}`]);
@@ -439,9 +487,28 @@
         document.getElementById('endStats').innerHTML=`红方（女漂泊者）占有格子数：${r1}<br>蓝方（男漂泊者）占有格子数：${r2}`;
     }
 
+    function showScoreModal() {
+        const container = document.getElementById('scoreContent');
+        let html = '<table class="score-table"><thead><tr><th>回合</th><th>红方分数</th><th>蓝方分数</th></tr></thead><tbody>';
+        let lastP1 = 0, lastP2 = 0;
+        scoreHistory.forEach((entry) => {
+            const delta1 = entry.p1 - lastP1;
+            const delta2 = entry.p2 - lastP2;
+            const sign1 = delta1 >= 0 ? '+' : '';
+            const sign2 = delta2 >= 0 ? '+' : '';
+            html += `<tr><td>第${entry.round}回合</td><td>${entry.p1} (${sign1}${delta1})</td><td>${entry.p2} (${sign2}${delta2})</td></tr>`;
+            lastP1 = entry.p1;
+            lastP2 = entry.p2;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        document.getElementById('scoreModal').classList.add('active');
+    }
+
     function resetGame() {
         P1.row=0;P1.col=0;P2.row=6;P2.col=6; currentPlayer=P1; phase='move'; round=1; gameOver=false; winner=null; skipMessage=''; aiThinking=false;
         hWalls=Array(SIZE-1).fill().map(()=>Array(SIZE).fill(false)); vWalls=Array(SIZE).fill().map(()=>Array(SIZE-1).fill(false));
+        scoreHistory = [];
         updateValidActions(); resetCursorToPlayer(); updateUI();
         document.getElementById('endModal').classList.remove('active'); document.getElementById('pauseModal').classList.remove('active');
         drawBoard();
@@ -457,37 +524,7 @@
         P1.row = state.p1.row; P1.col = state.p1.col; P2.row = state.p2.row; P2.col = state.p2.col;
     }
 
-    // ★ 全面评估函数 ★
-    function evaluateForAI() {
-        const ai = P2, human = P1;
-        const aiRegion = countRegion(ai.row, ai.col, human);
-        const humanRegion = countRegion(human.row, human.col, ai);
-        if (!isConnected(ai.row, ai.col, human.row, human.col)) {
-            // 已经断开，直接返回极大/极小值
-            return aiRegion > humanRegion ? 100000 : -100000;
-        }
-        let score = 0;
-        // 1. 领地差（核心）
-        score += (aiRegion - humanRegion) * 15;
-        // 2. 机动性（可移动格子数）
-        const aiMoves = getReachableCells(ai.row, ai.col, 3, human).length;
-        const humanMoves = getReachableCells(human.row, human.col, 3, ai).length;
-        score += (aiMoves - humanMoves) * 3;
-        // 3. 距离：鼓励AI接近人类，以便限制人类空间（但不能贴太近导致自己被堵）
-        const dist = Math.abs(ai.row - human.row) + Math.abs(ai.col - human.col);
-        // 太远不利，适中最好；这里用倒数形式，且距离2~3最佳
-        score -= Math.max(0, dist - 3) * 2;   // 距离超过3惩罚
-        // 4. 中心化：中心区域(3,3)附近更开阔
-        const centerDist = Math.abs(ai.row - 3) + Math.abs(ai.col - 3);
-        score -= centerDist * 1.5;
-        // 5. 边界惩罚：紧贴边界会减少扩展方向
-        if (ai.row === 0 || ai.row === SIZE-1) score -= 5;
-        if (ai.col === 0 || ai.col === SIZE-1) score -= 5;
-        // 6. 对方边界奖励（希望对方被困边界）
-        if (human.row === 0 || human.row === SIZE-1) score += 5;
-        if (human.col === 0 || human.col === SIZE-1) score += 5;
-        return score;
-    }
+    function evaluateForAI() { return evaluateForPlayer(P2); }
 
     function getAIValidMoves(player) {
         const opponent = (player === P1) ? P2 : P1;
@@ -501,7 +538,6 @@
         }).filter(x=> x.walls.length > 0);
     }
 
-    // 使用 alpha-beta 的 minimax
     function minimax(depth, alpha, beta, maximizing) {
         if (depth === 0 || gameOver) return evaluateForAI();
         const saved = cloneState();
@@ -537,19 +573,32 @@
         return bestScore;
     }
 
-    function aiFindBestMove() {
-        // 根据难度随机决定搜索深度
-        let desiredDepth;
-        const rand = Math.random();
-        if (aiDifficulty === 'easy') {
-            desiredDepth = rand < 0.1 ? 2 : 4;
-        } else if (aiDifficulty === 'medium') {
-            desiredDepth = rand < 0.9 ? 4 : 6;
-        } else {
-            desiredDepth = rand < 0.5 ? 6 : 4;
-        }
+    function aiFindBestMove(desiredDepth) {
         const moves = getAIValidMoves(P2);
+        if (moves.length === 0) return null;
+        if (desiredDepth === 2) {
+            for (const { move, walls } of moves) {
+                P2.row = move.row; P2.col = move.col;
+                for (const w of walls) {
+                    if (w.dir === 'h') hWalls[w.row][w.col] = true;
+                    else vWalls[w.row][w.col] = true;
+                    const ended = checkGameEnd();
+                    const isWin = (winner === 'P2');
+                    if (w.dir === 'h') hWalls[w.row][w.col] = false;
+                    else vWalls[w.row][w.col] = false;
+                    gameOver = false; winner = null;
+                    if (ended && isWin) {
+                        P2.row = move.row; P2.col = move.col;
+                        if (w.dir === 'h') hWalls[w.row][w.col] = true;
+                        else vWalls[w.row][w.col] = true;
+                        return { move, wall: w, immediate: true };
+                    }
+                }
+                P2.row = cloneState().p2.row; P2.col = cloneState().p2.col;
+            }
+        }
         let bestMove = null, bestWall = null, bestScore = -Infinity;
+        let backupMove = null, backupWall = null, backupScore = -Infinity;
         const saved = cloneState();
         for (const { move, walls } of moves) {
             P2.row = move.row; P2.col = move.col;
@@ -561,28 +610,42 @@
                 if (w.dir === 'h') hWalls[w.row][w.col] = false;
                 else vWalls[w.row][w.col] = false;
                 gameOver = false; winner = null;
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMove = move;
-                    bestWall = w;
+                if (score > -10000) {
+                    if (score > bestScore) { bestScore = score; bestMove = move; bestWall = w; }
+                } else {
+                    if (score > backupScore) { backupScore = score; backupMove = move; backupWall = w; }
                 }
             }
             P2.row = saved.p2.row; P2.col = saved.p2.col;
         }
         restoreState(saved);
+        if (!bestMove && backupMove) return { move: backupMove, wall: backupWall };
         return { move: bestMove, wall: bestWall };
+    }
+
+    function getAIDepth() {
+        const rand = Math.random();
+        if (aiDifficulty === 'beginner') return 2;
+        if (aiDifficulty === 'intermediate') return rand < 0.1 ? 2 : 4;
+        if (aiDifficulty === 'advanced') return rand < 0.9 ? 4 : 6;
+        if (aiDifficulty === 'expert') return rand < 0.5 ? 6 : 4;
+        return 4;
     }
 
     function triggerAI() {
         if (gameOver || gameMode !== 'ai' || currentPlayer !== P2 || aiThinking) return;
         aiThinking = true;
         updateUI();
-        let minTime = 0.25, maxTime = 0.75;
-        if (round > 10 && round <= 20) { minTime = 0.5; maxTime = 1.0; }
-        const delay = minTime + Math.random() * (maxTime - minTime);
+        const depth = getAIDepth();
+        let delay = 0;
+        if (aiDifficulty !== 'beginner') {
+            let minTime = 0.25, maxTime = 0.75;
+            if (round > 10 && round <= 20) { minTime = 0.5; maxTime = 1.0; }
+            delay = minTime + Math.random() * (maxTime - minTime);
+        }
         aiTimer = setTimeout(() => {
-            const result = aiFindBestMove();
-            if (result.move && result.wall) {
+            const result = aiFindBestMove(depth);
+            if (result && result.move && result.wall) {
                 P2.row = result.move.row; P2.col = result.move.col;
                 if (result.wall.dir === 'h') hWalls[result.wall.row][result.wall.col] = true;
                 else vWalls[result.wall.row][result.wall.col] = true;
@@ -649,11 +712,16 @@
         }
     });
 
-    // ---------- 按钮事件 ----------
     document.getElementById('resetBtn').addEventListener('click', ()=>{ if(aiTimer) clearTimeout(aiTimer); resetGame(); });
     document.getElementById('resumeBtn').addEventListener('click', ()=>document.getElementById('pauseModal').classList.remove('active'));
     document.getElementById('resetFromPauseBtn').addEventListener('click', ()=>{ if(aiTimer) clearTimeout(aiTimer); resetGame(); });
-    document.getElementById('closeEndBtn').addEventListener('click', ()=>document.getElementById('endModal').classList.remove('active'));
+    document.getElementById('closeEndBtn').addEventListener('click', ()=>{
+        document.getElementById('endModal').classList.remove('active');
+        showScoreModal();
+    });
+    document.getElementById('closeScoreBtn').addEventListener('click', ()=>{
+        document.getElementById('scoreModal').classList.remove('active');
+    });
 
     document.getElementById('twoPlayerBtn').addEventListener('click', ()=>{
         gameMode = 'pvp';
@@ -663,7 +731,6 @@
     });
 
     document.getElementById('aiPlayerBtn').addEventListener('click', ()=>{
-        // 显示难度选择
         document.getElementById('mode-screen').classList.remove('active');
         document.getElementById('difficulty-screen').style.visibility = 'visible';
     });
@@ -676,9 +743,10 @@
         resetGame();
     }
 
-    document.getElementById('easyBtn').addEventListener('click', ()=> startAIGame('easy'));
-    document.getElementById('mediumBtn').addEventListener('click', ()=> startAIGame('medium'));
-    document.getElementById('hardBtn').addEventListener('click', ()=> startAIGame('hard'));
+    document.getElementById('diff1Btn').addEventListener('click', ()=> startAIGame('beginner'));
+    document.getElementById('diff2Btn').addEventListener('click', ()=> startAIGame('intermediate'));
+    document.getElementById('diff3Btn').addEventListener('click', ()=> startAIGame('advanced'));
+    document.getElementById('diff4Btn').addEventListener('click', ()=> startAIGame('expert'));
 
     document.getElementById('backToModeBtn').addEventListener('click', ()=>{
         if (aiTimer) clearTimeout(aiTimer);
