@@ -147,7 +147,7 @@
         let vWalls = Array(SIZE).fill().map(() => Array(SIZE-1).fill(false));
 
         let cursor = { row: 0, col: 0 };
-        let wallCursor = { row: 0, col: 0, dir: 'h' };
+        let wallCursor = null;  // 放墙阶段选中的墙体 {row, col, dir}，null表示未选中
         let validMoves = [];
         let validWalls = [];
 
@@ -226,7 +226,6 @@
             return count;
         }
 
-        // 获取某个玩家所在的完整区域（格子集合）
         function getPlayerRegion(player, opponent) {
             const set = new Set();
             const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
@@ -238,7 +237,6 @@
                 for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
                     let nr = r + dr, nc = c + dc;
                     if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
-                        // 不进入对手棋子所在的格子
                         if (nr === opponent.row && nc === opponent.col) continue;
                         visited[nr][nc] = true;
                         queue.push([nr, nc]);
@@ -321,9 +319,12 @@
         function resetCursorToPlayer() {
             cursor.row = currentPlayer.row;
             cursor.col = currentPlayer.col;
-            wallCursor.row = currentPlayer.row;
-            wallCursor.col = currentPlayer.col;
-            wallCursor.dir = 'h';
+            // 放墙阶段光标默认选第一个合法墙体
+            if (validWalls.length > 0) {
+                wallCursor = validWalls[0];
+            } else {
+                wallCursor = null;
+            }
         }
 
         function movePlayer(targetRow, targetCol) {
@@ -331,6 +332,12 @@
             currentPlayer.col = targetCol;
             phase = 'wall';
             updateValidActions();
+            // 进入放墙阶段，默认选中第一个合法墙体
+            if (validWalls.length > 0) {
+                wallCursor = validWalls[0];
+            } else {
+                wallCursor = null;
+            }
             if (validWalls.length === 0) {
                 gameOver = true;
                 winner = (currentPlayer === P1) ? 'P2' : 'P1';
@@ -353,10 +360,28 @@
             switchPlayer();
         }
 
+        // 根据方向键获取对应的墙体方向
+        function getWallDirByKey(key) {
+            const dirMap = {
+                'ArrowUp': { dCol: 0, dRow: -1, dir: 'h', rowOff: -1, colOff: 0 },
+                'ArrowDown': { dCol: 0, dRow: 1, dir: 'h', rowOff: 0, colOff: 0 },
+                'ArrowLeft': { dCol: -1, dRow: 0, dir: 'v', rowOff: 0, colOff: -1 },
+                'ArrowRight': { dCol: 1, dRow: 0, dir: 'v', rowOff: 0, colOff: 0 },
+                'w': { dCol: 0, dRow: -1, dir: 'h', rowOff: -1, colOff: 0 },
+                'W': { dCol: 0, dRow: -1, dir: 'h', rowOff: -1, colOff: 0 },
+                's': { dCol: 0, dRow: 1, dir: 'h', rowOff: 0, colOff: 0 },
+                'S': { dCol: 0, dRow: 1, dir: 'h', rowOff: 0, colOff: 0 },
+                'a': { dCol: -1, dRow: 0, dir: 'v', rowOff: 0, colOff: -1 },
+                'A': { dCol: -1, dRow: 0, dir: 'v', rowOff: 0, colOff: -1 },
+                'd': { dCol: 1, dRow: 0, dir: 'v', rowOff: 0, colOff: 0 },
+                'D': { dCol: 1, dRow: 0, dir: 'v', rowOff: 0, colOff: 0 },
+            };
+            return dirMap[key] || null;
+        }
+
         function drawBoard() {
             ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
 
-            // 游戏结束时，获取双方区域集合
             let p1RegionSet = new Set();
             let p2RegionSet = new Set();
             if (gameOver) {
@@ -364,18 +389,17 @@
                 p2RegionSet = getPlayerRegion(P2, P1);
             }
 
-            // 绘制格子背景（根据区域染色）
             for (let r = 0; r < SIZE; r++) {
                 for (let c = 0; c < SIZE; c++) {
                     let x = c * CELL, y = r * CELL;
                     const key = `${r},${c}`;
                     if (gameOver) {
                         if (p1RegionSet.has(key)) {
-                            ctx.fillStyle = 'rgba(231, 76, 60, 0.25)'; // 浅红
+                            ctx.fillStyle = 'rgba(231, 76, 60, 0.25)';
                         } else if (p2RegionSet.has(key)) {
-                            ctx.fillStyle = 'rgba(52, 152, 219, 0.25)'; // 浅蓝
+                            ctx.fillStyle = 'rgba(52, 152, 219, 0.25)';
                         } else {
-                            ctx.fillStyle = '#faf3e0'; // 废弃格子保持原色
+                            ctx.fillStyle = '#faf3e0';
                         }
                     } else {
                         ctx.fillStyle = '#faf3e0';
@@ -387,7 +411,6 @@
                 }
             }
 
-            // 已放置的墙 (红色)
             ctx.strokeStyle = '#c0392b';
             ctx.lineWidth = 5;
             for (let r = 0; r < SIZE-1; r++) {
@@ -407,8 +430,7 @@
                 }
             }
 
-            // 废弃区域红色叉叉（无主格子，游戏未结束也显示以提醒玩家）
-            if (!gameOver || gameOver) { // 始终显示废弃区域
+            if (!gameOver || gameOver) {
                 const abandoned = new Set();
                 const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
                 const playerPositions = new Set([`${P1.row},${P1.col}`, `${P2.row},${P2.col}`]);
@@ -438,7 +460,6 @@
                 }
                 abandoned.forEach(key => {
                     const [rr, cc] = key.split(',').map(Number);
-                    // 如果游戏结束且该格子属于某一方区域，则不画叉（但废弃格子不属于任何一方，所以安全）
                     if (gameOver && (p1RegionSet.has(key) || p2RegionSet.has(key))) return;
                     ctx.save();
                     ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3;
@@ -451,21 +472,21 @@
                 });
             }
 
-            // 可移动格子高亮 (浅蓝)
             if (phase === 'move' && !gameOver) {
                 ctx.fillStyle = 'rgba(173, 216, 230, 0.4)';
                 validMoves.forEach(m => ctx.fillRect(m.col * CELL, m.row * CELL, CELL, CELL));
             }
 
-            // 放墙阶段：合法墙用普通黄色显示
+            // 放墙阶段：合法墙用普通黄色，选中的墙用亮黄色高亮
             if (phase === 'wall' && !gameOver) {
                 validWalls.forEach(w => {
                     let x, y, wlen;
                     if (w.dir === 'h') { y = (w.row+1)*CELL; x = w.col*CELL; wlen = CELL; }
                     else { x = (w.col+1)*CELL; y = w.row*CELL; wlen = CELL; }
+                    const isSelected = wallCursor && wallCursor.row === w.row && wallCursor.col === w.col && wallCursor.dir === w.dir;
                     ctx.save();
-                    ctx.strokeStyle = '#f1c40f';
-                    ctx.lineWidth = 5;
+                    ctx.strokeStyle = isSelected ? '#ffff00' : '#f1c40f';
+                    ctx.lineWidth = isSelected ? 9 : 5;
                     ctx.beginPath();
                     if (w.dir === 'h') { ctx.moveTo(x, y); ctx.lineTo(x+wlen, y); }
                     else { ctx.moveTo(x, y); ctx.lineTo(x, y+wlen); }
@@ -474,7 +495,6 @@
                 });
             }
 
-            // 移动光标 (绿色框)
             if (!gameOver && phase === 'move') {
                 ctx.save();
                 ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3;
@@ -483,7 +503,6 @@
                 ctx.restore();
             }
 
-            // 棋子
             function drawPlayer(p) {
                 let x = p.col * CELL + CELL/2, y = p.row * CELL + CELL/2;
                 ctx.save();
@@ -548,6 +567,7 @@
 
         function handleWallConfirm() {
             if (phase !== 'wall' || gameOver) return;
+            if (!wallCursor) return;
             const w = validWalls.find(v => v.row === wallCursor.row && v.col === wallCursor.col && v.dir === wallCursor.dir);
             if (w) { placeWall(w.row, w.col, w.dir); drawBoard(); }
         }
@@ -566,19 +586,35 @@
                 drawBoard();
             } else if (phase === 'wall') {
                 if (key === 'r' || key === 'R') { phase = 'move'; updateUI(); drawBoard(); return; }
-                if (key === 'ArrowUp' || key === 'w' || key === 'W') {
-                    wallCursor.row = Math.max(0, wallCursor.row - 1);
-                } else if (key === 'ArrowDown' || key === 's' || key === 'S') {
-                    if (wallCursor.dir === 'h') wallCursor.row = Math.min(SIZE-2, wallCursor.row + 1);
-                    else wallCursor.row = Math.min(SIZE-1, wallCursor.row + 1);
-                } else if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
-                    wallCursor.col = Math.max(0, wallCursor.col - 1);
-                } else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
-                    if (wallCursor.dir === 'h') wallCursor.col = Math.min(SIZE-1, wallCursor.col + 1);
-                    else wallCursor.col = Math.min(SIZE-2, wallCursor.col + 1);
-                } else if (key === ' ') { handleWallConfirm(); return; }
-                else if (key === 'Tab') { wallCursor.dir = wallCursor.dir === 'h' ? 'v' : 'h'; }
-                drawBoard();
+                const dirInfo = getWallDirByKey(key);
+                if (dirInfo) {
+                    // 根据方向键选择对应的墙体
+                    const r = currentPlayer.row;
+                    const c = currentPlayer.col;
+                    let targetRow, targetCol, targetDir;
+                    if (dirInfo.dir === 'h') {
+                        // 上边(row-1, col) 或 下边(row, col)
+                        if (dirInfo.dRow < 0) {
+                            targetRow = r - 1; targetCol = c; targetDir = 'h';
+                        } else {
+                            targetRow = r; targetCol = c; targetDir = 'h';
+                        }
+                    } else {
+                        // 左边(row, col-1) 或 右边(row, col)
+                        if (dirInfo.dCol < 0) {
+                            targetRow = r; targetCol = c - 1; targetDir = 'v';
+                        } else {
+                            targetRow = r; targetCol = c; targetDir = 'v';
+                        }
+                    }
+                    const found = validWalls.find(v => v.row === targetRow && v.col === targetCol && v.dir === targetDir);
+                    if (found) {
+                        wallCursor = found;
+                        drawBoard();
+                    }
+                    return;
+                }
+                if (key === ' ') { handleWallConfirm(); return; }
             }
         });
 
