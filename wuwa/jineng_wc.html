@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>团子围城 · 技能版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            user-select: none;
+            flex-direction: column;
+            padding: 20px;
+        }
+        .game-container { display: flex; flex-direction: column; align-items: center; gap: 20px; max-width: 700px; width: 100%; }
+        canvas {
+            border: 3px solid #2a2a4a; border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); background: #f5f0e1;
+            display: block; touch-action: none;
+        }
+        .panels { display: flex; width: 100%; gap: 15px; flex-wrap: wrap; justify-content: center; }
+        .panel {
+            flex: 1 1 250px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px);
+            border-radius: 16px; padding: 18px; color: #e0e0e0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .panel h3 { margin-bottom: 12px; font-size: 1.2rem; color: #ffd966; }
+        .status-line { margin: 6px 0; font-size: 0.95rem; }
+        .rules { font-size: 0.85rem; line-height: 1.6; color: #ccc; }
+        .rules li { margin-bottom: 6px; }
+        .highlight { background: #facc15; color: #1a1a2e; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .button-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+        button {
+            background: #3a4a6b; border: none; color: white; padding: 10px 18px;
+            border-radius: 30px; font-size: 0.9rem; cursor: pointer; transition: 0.2s; font-weight: 600;
+        }
+        button:hover { background: #5a6b8b; transform: translateY(-1px); }
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+            z-index: 100; visibility: hidden;
+        }
+        .modal.active { visibility: visible; }
+        .modal-content {
+            background: #2a2a4a; border-radius: 24px; padding: 30px; text-align: center;
+            color: white; max-width: 500px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            max-height: 80vh; overflow-y: auto;
+        }
+        .modal h2 { margin-bottom: 20px; font-size: 1.8rem; }
+        .modal button { margin: 8px; }
+        .score-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.9rem; }
+        .score-table th, .score-table td { padding: 6px 10px; border-bottom: 1px solid #555; text-align: center; }
+        .score-table th { color: #ffd966; }
+        .character-grid { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; }
+        .character-card {
+            background: #1e293b; border-radius: 12px; padding: 15px; width: 120px;
+            cursor: pointer; transition: 0.2s; text-align: center;
+        }
+        .character-card:hover { background: #334155; transform: translateY(-2px); }
+        .character-card img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; }
+        .character-card.selected { border: 3px solid #facc15; }
+        .skill-btn { margin-left: 8px; padding: 5px 12px; font-size: 0.8rem; background: #e67e22; border-radius: 20px; }
+    </style>
+</head>
+<body>
+<!-- 模式选择 -->
+<div id="mode-screen" class="modal active">
+    <div class="modal-content">
+        <h2>🍡 团子围城 · 技能版</h2>
+        <button id="twoPlayerBtn">👥 双人对战</button>
+        <button id="aiPlayerBtn">🤖 人机对战</button>
+    </div>
+</div>
+
+<!-- 难度选择 -->
+<div id="difficulty-screen" class="modal" style="visibility:hidden">
+    <div class="modal-content" style="max-width:450px">
+        <h2>🤖 选择电脑难度</h2>
+        <button id="diff1Btn">📘 初窥门径</button>
+        <button id="diff2Btn">📗 循序渐进</button>
+        <button id="diff3Btn">📙 渐入佳境</button>
+        <button id="diff4Btn">📕 炉火纯青</button>
+    </div>
+</div>
+
+<!-- 角色选择界面 -->
+<div id="char-select-screen" class="modal" style="visibility:hidden">
+    <div class="modal-content">
+        <h2 id="char-select-title">红方选择角色</h2>
+        <div class="character-grid" id="character-grid"></div>
+        <button id="random-char-btn" style="margin-top:15px;">🎲 随机选择</button>
+    </div>
+</div>
+
+<!-- 游戏主界面 -->
+<div id="game-screen" class="game-container" style="display: none;">
+    <canvas id="gameCanvas" width="420" height="420"></canvas>
+    <div class="panels">
+        <div class="panel" id="statusPanel">
+            <h3>📋 状态面板</h3>
+            <div class="status-line">👤 当前回合：<span id="turnDisplay">红方（女漂泊者）</span></div>
+            <div class="status-line">🎯 当前阶段：<span id="phaseDisplay" class="highlight">移动阶段</span></div>
+            <div class="status-line">📌 游戏状态：<span id="gameStateDisplay">游戏中（第1回合）</span></div>
+            <div class="status-line" id="skipMsg" style="color:#f39c12;"></div>
+            <div class="status-line" id="winnerDisplay" style="color:#ffb347;"></div>
+            <div class="status-line" id="skillDisplay" style="margin-top:8px; color:#facc15;"></div>
+        </div>
+        <div class="panel">
+            <h3>📜 围城规则</h3>
+            <ul class="rules">
+                <li>1. 每回合移动1-3步后必须放一堵墙</li>
+                <li>2. 不穿墙、墙不越界、不踩对方棋子</li>
+                <li>3. 墙阻断所有通路即为游戏结束</li>
+                <li>4. 可达格子多者胜，相等则平局</li>
+                <li>5. 方向键/WASD移动光标，空格确认，R返回移动阶段并复位</li>
+            </ul>
+        </div>
+    </div>
+    <div class="button-group">
+        <button id="resetBtn">🔄 重新开始</button>
+        <button id="backToModeBtn">🔙 返回</button>
+    </div>
+</div>
+
+<!-- 暂停 -->
+<div class="modal" id="pauseModal">
+    <div class="modal-content">
+        <h2>⏸️ 游戏暂停</h2>
+        <button id="resumeBtn">▶ 继续游戏</button>
+        <button id="resetFromPauseBtn">🔄 重新开始</button>
+    </div>
+</div>
+
+<!-- 结束 -->
+<div class="modal" id="endModal">
+    <div class="modal-content">
+        <h2 id="endMessage">游戏结束</h2>
+        <div id="endStats" style="margin: 15px 0; font-size: 1rem;"></div>
+        <button id="closeEndBtn">确定</button>
+    </div>
+</div>
+
+<!-- 分数报告 -->
+<div class="modal" id="scoreModal">
+    <div class="modal-content" style="max-width:500px">
+        <h2>📊 比赛数据</h2>
+        <div id="scoreContent"></div>
+        <button id="closeScoreBtn">确定</button>
+    </div>
+</div>
+
+<script>
+(function() {
+    // ---------- 角色数据 ----------
+    const CHARACTERS = [
+        { id: 'male', name: '男漂泊者', short: '男', img: './团子图片/漂泊者_男.png', color: '#61afef',
+          skillName: '无', skillDesc: '无技能', skillType: 'none' },
+        { id: 'female', name: '女漂泊者', short: '女', img: './团子图片/漂泊者_女.png', color: '#e06c75',
+          skillName: '无', skillDesc: '无技能', skillType: 'none' },
+        { id: 'jinxi', name: '今汐', short: '今', img: './团子图片/今汐.png', color: '#67e8f9',
+          skillName: '移岁诛邪', skillDesc: '放墙时多放1堵墙', skillType: 'active_wall' },
+        { id: 'changli', name: '长离', short: '长', img: './团子图片/长离.png', color: '#cbd5e1',
+          skillName: '离火照丹心', skillDesc: '移动可走4格', skillType: 'active_move' },
+        { id: 'shouan', name: '守岸人', short: '守', img: './团子图片/守岸人.png', color: '#4ade80',
+          skillName: '浅析星域', skillDesc: '只移动不放墙', skillType: 'active_skipwall' },
+        { id: 'kaka', name: '卡卡罗', short: '卡', img: './团子图片/卡卡罗.png', color: '#d8b4fe',
+          skillName: '幻想蚀刻', skillDesc: '格子数+2', skillType: 'passive' }
+    ];
+
+    // ---------- 全局变量 ----------
+    const SIZE = 7, CELL = 60, BOARD_PX = SIZE * CELL;
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let P1 = { row: 0, col: 0, name: '红方', char: CHARACTERS[1], color: '#e06c75', img: new Image() };
+    let P2 = { row: 6, col: 6, name: '蓝方', char: CHARACTERS[0], color: '#61afef', img: new Image() };
+    P1.img.src = CHARACTERS[1].img;
+    P2.img.src = CHARACTERS[0].img;
+
+    let gameMode = 'pvp';
+    let aiDifficulty = 'beginner';
+    let currentPlayer = P1;
+    let phase = 'move';
+    let round = 1;
+    let gameOver = false;
+    let winner = null;
+    let skipMessage = '';
+    let aiThinking = false;
+    let aiTimer = null;
+    let moveStartPos = { row: 0, col: 0 };
+
+    // 技能状态
+    let skillUsedP1 = false;
+    let skillUsedP2 = false;
+    let extraWallActive = false;   // 今汐额外放墙
+    let skipWallActive = false;    // 守岸人跳过放墙
+
+    let hWalls = Array(SIZE-1).fill().map(() => Array(SIZE).fill(false));
+    let vWalls = Array(SIZE).fill().map(() => Array(SIZE-1).fill(false));
+    let cursor = { row: 0, col: 0 };
+    let wallCursor = null;
+    let validMoves = [], validWalls = [];
+    let scoreHistory = [];
+
+    // 角色选择状态
+    let selectingPlayer = null;
+
+    // ---------- 基础函数 ----------
+    function isWallBetween(r1, c1, r2, c2) {
+        if (r1 === r2) { let minC = Math.min(c1, c2); return vWalls[r1][minC]; }
+        if (c1 === c2) { let minR = Math.min(r1, r2); return hWalls[minR][c1]; }
+        return false;
+    }
+
+    function canMoveTo(r1, c1, r2, c2) {
+        if (r2 < 0 || r2 >= SIZE || c2 < 0 || c2 >= SIZE) return false;
+        if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return false;
+        return !isWallBetween(r1, c1, r2, c2);
+    }
+
+    function getReachableCells(startRow, startCol, maxSteps, opponentPos) {
+        const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+        const queue = [[startRow, startCol, 0]];
+        visited[startRow][startCol] = true;
+        const cells = [];
+        while (queue.length) {
+            const [r, c, d] = queue.shift();
+            if (d > 0 && !(r === opponentPos.row && c === opponentPos.col)) cells.push({ row: r, col: c });
+            if (d < maxSteps) {
+                for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                        if (!(nr === opponentPos.row && nc === opponentPos.col)) {
+                            visited[nr][nc] = true;
+                            queue.push([nr, nc, d + 1]);
+                        }
+                    }
+                }
+            }
+        }
+        return cells;
+    }
+
+    function isConnected(r1, c1, r2, c2) {
+        const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+        const queue = [[r1, c1]];
+        visited[r1][c1] = true;
+        while (queue.length) {
+            const [r, c] = queue.shift();
+            if (r === r2 && c === c2) return true;
+            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                let nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                    visited[nr][nc] = true;
+                    queue.push([nr, nc]);
+                }
+            }
+        }
+        return false;
+    }
+
+    function countRegion(row, col, excludePos = null) {
+        const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+        const queue = [[row, col]];
+        visited[row][col] = true;
+        let count = 0;
+        while (queue.length) {
+            const [r, c] = queue.shift();
+            count++;
+            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                let nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                    if (excludePos && nr === excludePos.row && nc === excludePos.col) continue;
+                    visited[nr][nc] = true;
+                    queue.push([nr, nc]);
+                }
+            }
+        }
+        return count;
+    }
+
+    function getPlayerRegion(player, opponent) {
+        const set = new Set();
+        const visited = Array(SIZE).fill().map(() => Array(SIZE).fill(false));
+        const queue = [[player.row, player.col]];
+        visited[player.row][player.col] = true;
+        while (queue.length) {
+            const [r, c] = queue.shift();
+            set.add(`${r},${c}`);
+            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                let nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && !visited[nr][nc] && canMoveTo(r, c, nr, nc)) {
+                    if (nr === opponent.row && nc === opponent.col) continue;
+                    visited[nr][nc] = true;
+                    queue.push([nr, nc]);
+                }
+            }
+        }
+        return set;
+    }
+
+    function wallPlacementValid(wallRow, wallCol, dir) {
+        if (dir === 'h') { if (hWalls[wallRow][wallCol]) return false; hWalls[wallRow][wallCol] = true; }
+        else { if (vWalls[wallRow][wallCol]) return false; vWalls[wallRow][wallCol] = true; }
+        const p1Region = countRegion(P1.row, P1.col, P2);
+        const p2Region = countRegion(P2.row, P2.col, P1);
+        if (dir === 'h') hWalls[wallRow][wallCol] = false;
+        else vWalls[wallRow][wallCol] = false;
+        return p1Region >= 1 && p2Region >= 1;
+    }
+
+    function getNeighborWalls(player) {
+        const r = player.row, c = player.col;
+        const candidates = [];
+        if (r > 0) candidates.push({ row: r-1, col: c, dir: 'h' });
+        if (r < SIZE-1) candidates.push({ row: r, col: c, dir: 'h' });
+        if (c > 0) candidates.push({ row: r, col: c-1, dir: 'v' });
+        if (c < SIZE-1) candidates.push({ row: r, col: c, dir: 'v' });
+        return candidates.filter(w => wallPlacementValid(w.row, w.col, w.dir));
+    }
+
+    function getMaxMoveSteps() {
+        let steps = 3;
+        if (currentPlayer === P1 && P1.char.skillType === 'active_move' && skillUsedP1) steps = 4;
+        if (currentPlayer === P2 && P2.char.skillType === 'active_move' && skillUsedP2) steps = 4;
+        return steps;
+    }
+
+    function updateValidActions() {
+        const opponent = (currentPlayer === P1) ? P2 : P1;
+        const maxSteps = getMaxMoveSteps();
+        validMoves = getReachableCells(currentPlayer.row, currentPlayer.col, maxSteps, opponent);
+        validWalls = getNeighborWalls(currentPlayer);
+    }
+
+    function checkGameEnd() {
+        if (!isConnected(P1.row, P1.col, P2.row, P2.col)) {
+            gameOver = true;
+            let r1 = countRegion(P1.row, P1.col, P2);
+            let r2 = countRegion(P2.row, P2.col, P1);
+            if (P1.char.id === 'kaka') r1 += 2;
+            if (P2.char.id === 'kaka') r2 += 2;
+            if (r1 > r2) winner = 'P1';
+            else if (r2 > r1) winner = 'P2';
+            else winner = 'draw';
+            return true;
+        }
+        return false;
+    }
+
+    function computeDistances(player, opponent) {
+        const dist = Array(SIZE).fill().map(() => Array(SIZE).fill(Infinity));
+        const queue = [[player.row, player.col, 0]];
+        dist[player.row][player.col] = 0;
+        while (queue.length) {
+            const [r, c, d] = queue.shift();
+            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                let nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && dist[nr][nc] > d + 1 && canMoveTo(r, c, nr, nc)) {
+                    if (nr === opponent.row && nc === opponent.col) continue;
+                    dist[nr][nc] = d + 1;
+                    queue.push([nr, nc, d + 1]);
+                }
+            }
+        }
+        return dist;
+    }
+
+    function evaluateForPlayer(player) {
+        const opp = (player === P1) ? P2 : P1;
+        const myRegion = countRegion(player.row, player.col, opp);
+        const oppRegion = countRegion(opp.row, opp.col, player);
+        if (!isConnected(player.row, player.col, opp.row, opp.col)) {
+            return myRegion > oppRegion ? 10000 : -10000;
+        }
+        let score = 0;
+        score += (myRegion - oppRegion) * 15;
+        const myMoves = getReachableCells(player.row, player.col, 3, opp).length;
+        const oppMoves = getReachableCells(opp.row, opp.col, 3, player).length;
+        score += (myMoves - oppMoves) * 3;
+        const dist = Math.abs(player.row - opp.row) + Math.abs(player.col - opp.col);
+        score -= Math.max(0, dist - 3) * 2;
+        const centerDist = Math.abs(player.row - 3) + Math.abs(player.col - 3);
+        score -= centerDist * 1.5;
+        if (player.row === 0 || player.row === SIZE-1) score -= 5;
+        if (player.col === 0 || player.col === SIZE-1) score -= 5;
+        if (opp.row === 0 || opp.row === SIZE-1) score += 5;
+        if (opp.col === 0 || opp.col === SIZE-1) score += 5;
+        const myDist = computeDistances(player, opp);
+        const oppDist = computeDistances(opp, player);
+        let controlled = 0;
+        for (let r = 0; r < SIZE; r++) {
+            for (let c = 0; c < SIZE; c++) {
+                if (myDist[r][c] === Infinity && oppDist[r][c] === Infinity) continue;
+                if (myDist[r][c] < oppDist[r][c]) controlled++;
+                else if (oppDist[r][c] < myDist[r][c]) controlled--;
+            }
+        }
+        score += controlled * 1.2;
+        return score;
+    }
+
+    function switchPlayer(skipped = false) {
+        if (skipped) skipMessage = `${currentPlayer.name}因无法移动，跳过本次行动`;
+        else skipMessage = '';
+        currentPlayer = (currentPlayer === P1) ? P2 : P1;
+        phase = 'move';
+        if (currentPlayer === P1) {
+            round++;
+            const p1Score = Math.round(evaluateForPlayer(P1));
+            const p2Score = Math.round(evaluateForPlayer(P2));
+            scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
+        }
+        updateValidActions();
+        resetCursorToPlayer();
+        if (validMoves.length === 0) {
+            const other = (currentPlayer === P1) ? P2 : P1;
+            const otherMoves = getReachableCells(other.row, other.col, 3, currentPlayer);
+            if (otherMoves.length === 0) {
+                gameOver = true;
+                let r1 = countRegion(P1.row, P1.col, P2);
+                let r2 = countRegion(P2.row, P2.col, P1);
+                if (P1.char.id === 'kaka') r1 += 2;
+                if (P2.char.id === 'kaka') r2 += 2;
+                if (r1 > r2) winner = 'P1';
+                else if (r2 > r1) winner = 'P2';
+                else winner = 'draw';
+                if (currentPlayer === P1) {
+                    const p1Score = Math.round(evaluateForPlayer(P1));
+                    const p2Score = Math.round(evaluateForPlayer(P2));
+                    scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
+                }
+            } else {
+                switchPlayer(true);
+                return;
+            }
+        }
+        updateUI();
+        drawBoard();
+        if (gameOver) showEndModal();
+        else if (gameMode === 'ai' && currentPlayer === P2 && !aiThinking) {
+            triggerAI();
+        }
+    }
+
+    function resetCursorToPlayer() {
+        cursor.row = currentPlayer.row;
+        cursor.col = currentPlayer.col;
+        wallCursor = validWalls.length > 0 ? validWalls[0] : null;
+    }
+
+    function movePlayer(targetRow, targetCol) {
+        moveStartPos.row = currentPlayer.row;
+        moveStartPos.col = currentPlayer.col;
+        currentPlayer.row = targetRow;
+        currentPlayer.col = targetCol;
+
+        const isShouan = (currentPlayer === P1 && P1.char.id === 'shouan' && skillUsedP1) ||
+                         (currentPlayer === P2 && P2.char.id === 'shouan' && skillUsedP2);
+        if (isShouan) {
+            switchPlayer();
+            return;
+        }
+
+        phase = 'wall';
+        updateValidActions();
+        wallCursor = validWalls.length > 0 ? validWalls[0] : null;
+        if (validWalls.length === 0) {
+            gameOver = true;
+            winner = (currentPlayer === P1) ? 'P2' : 'P1';
+            updateUI();
+            showEndModal();
+            return;
+        }
+        updateUI();
+        drawBoard();
+    }
+
+    function cancelWall() {
+        currentPlayer.row = moveStartPos.row;
+        currentPlayer.col = moveStartPos.col;
+        phase = 'move';
+        updateValidActions();
+        resetCursorToPlayer();
+        if (currentPlayer === P1) { skillUsedP1 = false; extraWallActive = false; }
+        else { skillUsedP2 = false; extraWallActive = false; }
+        updateUI();
+        drawBoard();
+    }
+
+    function placeWall(row, col, dir) {
+        if (dir === 'h') hWalls[row][col] = true;
+        else vWalls[row][col] = true;
+
+        const isJinxi = (currentPlayer === P1 && P1.char.id === 'jinxi' && skillUsedP1 && extraWallActive) ||
+                        (currentPlayer === P2 && P2.char.id === 'jinxi' && skillUsedP2 && extraWallActive);
+        if (isJinxi) {
+            extraWallActive = false;
+            updateValidActions();
+            if (validWalls.length === 0) {
+                if (checkGameEnd()) { updateUI(); showEndModal(); return; }
+                switchPlayer();
+            } else {
+                wallCursor = validWalls[0];
+                drawBoard();
+            }
+            return;
+        }
+
+        if (checkGameEnd()) { updateUI(); showEndModal(); return; }
+        switchPlayer();
+    }
+
+    // ---------- 绘制 ----------
+    function drawBoard() {
+        ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
+        let p1RegionSet = new Set(), p2RegionSet = new Set();
+        if (gameOver) { p1RegionSet = getPlayerRegion(P1, P2); p2RegionSet = getPlayerRegion(P2, P1); }
+        for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+            let x = c * CELL, y = r * CELL;
+            const key = `${r},${c}`;
+            if (gameOver) ctx.fillStyle = p1RegionSet.has(key) ? 'rgba(231,76,60,0.25)' : p2RegionSet.has(key) ? 'rgba(52,152,219,0.25)' : '#faf3e0';
+            else ctx.fillStyle = '#faf3e0';
+            ctx.fillRect(x, y, CELL, CELL);
+            ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1; ctx.strokeRect(x, y, CELL, CELL);
+        }
+        ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 5;
+        for (let r = 0; r < SIZE-1; r++) for (let c = 0; c < SIZE; c++) if (hWalls[r][c]) { let y = (r+1)*CELL, x = c*CELL; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+CELL,y); ctx.stroke(); }
+        for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE-1; c++) if (vWalls[r][c]) { let x = (c+1)*CELL, y = r*CELL; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+CELL); ctx.stroke(); }
+        const abandoned = new Set();
+        const visited = Array(SIZE).fill().map(()=>Array(SIZE).fill(false));
+        const playerPositions = new Set([`${P1.row},${P1.col}`,`${P2.row},${P2.col}`]);
+        for (let r=0; r<SIZE; r++) for (let c=0; c<SIZE; c++) {
+            if (visited[r][c] || playerPositions.has(`${r},${c}`)) continue;
+            const regionCells = []; const queue = [[r,c]]; visited[r][c] = true; let hasPlayer = false;
+            while (queue.length) {
+                const [cr,cc] = queue.shift(); regionCells.push([cr,cc]);
+                if (playerPositions.has(`${cr},${cc}`)) hasPlayer = true;
+                for (let [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    let nr=cr+dr,nc=cc+dc;
+                    if (nr>=0&&nr<SIZE&&nc>=0&&nc<SIZE&&!visited[nr][nc]&&canMoveTo(cr,cc,nr,nc)) { visited[nr][nc]=true; queue.push([nr,nc]); }
+                }
+            }
+            if (!hasPlayer) regionCells.forEach(([rr,cc])=> abandoned.add(`${rr},${cc}`));
+        }
+        abandoned.forEach(key=>{
+            const [rr,cc]=key.split(',').map(Number);
+            if (gameOver && (p1RegionSet.has(key)||p2RegionSet.has(key))) return;
+            ctx.save(); ctx.strokeStyle='#e74c3c'; ctx.lineWidth=3; let x=cc*CELL,y=rr*CELL;
+            ctx.beginPath(); ctx.moveTo(x+10,y+10); ctx.lineTo(x+CELL-10,y+CELL-10); ctx.moveTo(x+CELL-10,y+10); ctx.lineTo(x+10,y+CELL-10); ctx.stroke(); ctx.restore();
+        });
+        if (phase==='move'&&!gameOver) { ctx.fillStyle='rgba(173,216,230,0.4)'; validMoves.forEach(m=>ctx.fillRect(m.col*CELL,m.row*CELL,CELL,CELL)); }
+        if (phase==='wall'&&!gameOver) validWalls.forEach(w=>{
+            let x,y,wlen;
+            if (w.dir==='h'){y=(w.row+1)*CELL;x=w.col*CELL;wlen=CELL;} else{x=(w.col+1)*CELL;y=w.row*CELL;wlen=CELL;}
+            const isSelected = wallCursor&&wallCursor.row===w.row&&wallCursor.col===w.col&&wallCursor.dir===w.dir;
+            ctx.save(); ctx.strokeStyle=isSelected?'#ffff00':'#f1c40f'; ctx.lineWidth=isSelected?9:5;
+            ctx.beginPath(); if(w.dir==='h'){ctx.moveTo(x,y);ctx.lineTo(x+wlen,y);}else{ctx.moveTo(x,y);ctx.lineTo(x,y+wlen);} ctx.stroke(); ctx.restore();
+        });
+        if (!gameOver && phase==='move') { ctx.save(); ctx.strokeStyle='#2ecc71'; ctx.lineWidth=3; let x=cursor.col*CELL,y=cursor.row*CELL; ctx.strokeRect(x+2,y+2,CELL-4,CELL-4); ctx.restore(); }
+        function drawPlayer(p){ let x=p.col*CELL+CELL/2,y=p.row*CELL+CELL/2; ctx.save(); ctx.beginPath(); ctx.arc(x,y,CELL/2.5,0,2*Math.PI); ctx.clip(); if(p.img.complete&&p.img.naturalWidth>0) ctx.drawImage(p.img,x-CELL/2.5,y-CELL/2.5,CELL/1.25,CELL/1.25); else{ctx.fillStyle=p.color;ctx.fill();} ctx.restore(); }
+        drawPlayer(P1); drawPlayer(P2);
+    }
+
+    function updateUI() {
+        document.getElementById('turnDisplay').textContent = aiThinking ? 'AI 思考中...' : currentPlayer.name;
+        document.getElementById('phaseDisplay').textContent = phase==='move'?'移动阶段':'放墙阶段';
+        document.getElementById('gameStateDisplay').textContent = gameOver?'结束':`游戏中（第${round}回合）`;
+        document.getElementById('skipMsg').textContent = skipMessage;
+        if (gameOver) {
+            if (winner==='P1') document.getElementById('winnerDisplay').textContent='🏆 红方（'+P1.char.name+'）胜利！';
+            else if (winner==='P2') document.getElementById('winnerDisplay').textContent='🏆 蓝方（'+P2.char.name+'）胜利！';
+            else document.getElementById('winnerDisplay').textContent='🤝 双方平局！';
+        } else document.getElementById('winnerDisplay').textContent='';
+
+        const skillDiv = document.getElementById('skillDisplay');
+        if (gameOver) { skillDiv.innerHTML = ''; return; }
+        const char = currentPlayer.char;
+        let skillText = `${char.skillName}：${char.skillDesc}`;
+        const used = (currentPlayer === P1) ? skillUsedP1 : skillUsedP2;
+        if (char.skillType !== 'none' && char.skillType !== 'passive') {
+            if (used) skillText += ' (已使用)';
+            else skillText += ' <button onclick="window._useSkill()" class="skill-btn">发动</button>';
+        }
+        skillDiv.innerHTML = skillText;
+    }
+
+    function showEndModal() {
+        document.getElementById('endModal').classList.add('active');
+        let msg = winner==='P1'?'红方（'+P1.char.name+'）胜利！':(winner==='P2'?'蓝方（'+P2.char.name+'）胜利！':'双方平局！');
+        document.getElementById('endMessage').textContent = '游戏结束 · '+msg;
+        const r1=countRegion(P1.row,P1.col,P2), r2=countRegion(P2.row,P2.col,P1);
+        document.getElementById('endStats').innerHTML=`红方占有格子数：${r1}<br>蓝方占有格子数：${r2}`;
+    }
+
+    function showScoreModal() {
+        const container = document.getElementById('scoreContent');
+        let html = '<table class="score-table"><thead><tr><th>回合</th><th>红方分数</th><th>蓝方分数</th></tr></thead><tbody>';
+        let lastP1 = 0, lastP2 = 0;
+        scoreHistory.forEach((entry) => {
+            const delta1 = entry.p1 - lastP1;
+            const delta2 = entry.p2 - lastP2;
+            const sign1 = delta1 >= 0 ? '+' : '';
+            const sign2 = delta2 >= 0 ? '+' : '';
+            html += `<tr><td>第${entry.round}回合</td><td>${entry.p1} (${sign1}${delta1})</td><td>${entry.p2} (${sign2}${delta2})</td></tr>`;
+            lastP1 = entry.p1;
+            lastP2 = entry.p2;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        document.getElementById('scoreModal').classList.add('active');
+    }
+
+    function resetGame() {
+        P1.row=0;P1.col=0;P2.row=6;P2.col=6; currentPlayer=P1; phase='move'; round=1; gameOver=false; winner=null; skipMessage=''; aiThinking=false;
+        skillUsedP1=false; skillUsedP2=false; extraWallActive=false;
+        moveStartPos.row = 0; moveStartPos.col = 0;
+        hWalls=Array(SIZE-1).fill().map(()=>Array(SIZE).fill(false)); vWalls=Array(SIZE).fill().map(()=>Array(SIZE-1).fill(false));
+        scoreHistory = [];
+        updateValidActions(); resetCursorToPlayer(); updateUI();
+        document.getElementById('endModal').classList.remove('active'); document.getElementById('pauseModal').classList.remove('active');
+        drawBoard();
+    }
+
+    // ---------- AI 增强版 (状态安全) ----------
+    function cloneState() {
+        return { hWalls: hWalls.map(r=>[...r]), vWalls: vWalls.map(r=>[...r]), p1:{row:P1.row,col:P1.col}, p2:{row:P2.row,col:P2.col} };
+    }
+
+    function restoreState(state) {
+        hWalls = state.hWalls.map(r=>[...r]); vWalls = state.vWalls.map(r=>[...r]);
+        P1.row = state.p1.row; P1.col = state.p1.col; P2.row = state.p2.row; P2.col = state.p2.col;
+    }
+
+    function evaluateForAI() { return evaluateForPlayer(P2); }
+
+    function getAllMoveWallCombos(player) {
+        const opponent = (player === P1) ? P2 : P1;
+        const moves = getReachableCells(player.row, player.col, 3, opponent);
+        const combos = [];
+        moves.forEach(m => {
+            const origR = player.row, origC = player.col;
+            player.row = m.row; player.col = m.col;
+            const walls = getNeighborWalls(player);
+            player.row = origR; player.col = origC;
+            walls.forEach(w => combos.push({ move: m, wall: w }));
+        });
+        return combos;
+    }
+
+    function getAIValidMoves(player) {
+        const opponent = (player === P1) ? P2 : P1;
+        const moves = getReachableCells(player.row, player.col, 3, opponent);
+        return moves.map(m => {
+            const origR = player.row, origC = player.col;
+            player.row = m.row; player.col = m.col;
+            const walls = getNeighborWalls(player);
+            player.row = origR; player.col = origC;
+            return { move: m, walls };
+        }).filter(x => x.walls.length > 0);
+    }
+
+    function minimax(depth, alpha, beta, maximizing) {
+        if (depth === 0 || gameOver) return evaluateForAI();
+        const saved = cloneState();
+        const current = maximizing ? P2 : P1;
+        const opponent = maximizing ? P1 : P2;
+        const moves = getAIValidMoves(current);
+        if (moves.length === 0) {
+            const temp = currentPlayer;
+            currentPlayer = opponent;
+            updateValidActions();
+            const score = minimax(depth-1, alpha, beta, !maximizing);
+            currentPlayer = temp;
+            return score;
+        }
+        let bestScore = maximizing ? -Infinity : Infinity;
+        for (const { move, walls } of moves) {
+            current.row = move.row; current.col = move.col;
+            for (const w of walls) {
+                if (w.dir === 'h') hWalls[w.row][w.col] = true;
+                else vWalls[w.row][w.col] = true;
+                checkGameEnd();
+                const score = minimax(depth-1, alpha, beta, !maximizing);
+                if (w.dir === 'h') hWalls[w.row][w.col] = false;
+                else vWalls[w.row][w.col] = false;
+                gameOver = false; winner = null;
+                if (maximizing) { bestScore = Math.max(bestScore, score); alpha = Math.max(alpha, score); }
+                else { bestScore = Math.min(bestScore, score); beta = Math.min(beta, score); }
+                if (beta <= alpha) break;
+            }
+            current.row = saved.p2.row; current.col = saved.p2.col;
+        }
+        restoreState(saved);
+        gameOver = false; winner = null;
+        return bestScore;
+    }
+
+    function immediateWinInfo(move, wall) {
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        const ended = checkGameEnd();
+        const isWin = (winner === 'P2');
+        let diff = 0;
+        if (ended && isWin) {
+            diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
+        }
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = false;
+        else vWalls[wall.row][wall.col] = false;
+        gameOver = false; winner = null;
+        return { win: ended && isWin, diff };
+    }
+
+    function isTwoStepKill(move, wall) {
+        const saved = cloneState();
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        if (checkGameEnd()) { restoreState(saved); gameOver=false; winner=null; return false; }
+        const opponentMoves = getAllMoveWallCombos(P1);
+        if (opponentMoves.length === 0) {
+            const aiMoves = getAllMoveWallCombos(P2);
+            let canWin = false;
+            for (const aiCombo of aiMoves) { const { win } = immediateWinInfo(aiCombo.move, aiCombo.wall); if (win) { canWin=true; break; } }
+            restoreState(saved); gameOver=false; winner=null; return canWin;
+        }
+        for (const oppCombo of opponentMoves) {
+            const oppSaved = cloneState();
+            P1.row = oppCombo.move.row; P1.col = oppCombo.move.col;
+            if (oppCombo.wall.dir === 'h') hWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            else vWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            if (checkGameEnd()) { restoreState(oppSaved); restoreState(saved); gameOver=false; winner=null; return false; }
+            const aiMoves = getAllMoveWallCombos(P2);
+            let aiCanWin = false;
+            for (const aiCombo of aiMoves) { const { win } = immediateWinInfo(aiCombo.move, aiCombo.wall); if (win) { aiCanWin=true; break; } }
+            restoreState(oppSaved); gameOver=false; winner=null;
+            if (!aiCanWin) { restoreState(saved); gameOver=false; winner=null; return false; }
+        }
+        restoreState(saved); gameOver=false; winner=null; return true;
+    }
+
+    function isOpponentOneStepKill(move, wall) {
+        const saved = cloneState();
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        if (checkGameEnd()) { restoreState(saved); gameOver=false; winner=null; return false; }
+        const opponentCombos = getAllMoveWallCombos(P1);
+        let result = false;
+        for (const oppCombo of opponentCombos) {
+            const oppSaved = cloneState();
+            P1.row = oppCombo.move.row; P1.col = oppCombo.move.col;
+            if (oppCombo.wall.dir === 'h') hWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            else vWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            const ended = checkGameEnd();
+            const isLoss = (winner === 'P1');
+            restoreState(oppSaved); gameOver=false; winner=null;
+            if (ended && isLoss) { result = true; break; }
+        }
+        restoreState(saved); gameOver=false; winner=null;
+        return result;
+    }
+
+    function aiFindBestMove(desiredDepth) {
+        const allCombos = getAllMoveWallCombos(P2);
+        if (allCombos.length === 0) return null;
+        let bestWin = null; let maxWinDiff = -Infinity;
+        const nonSuicidal = []; const suicidalWithDiffs = [];
+        for (const combo of allCombos) {
+            P2.row = combo.move.row; P2.col = combo.move.col;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+            else vWalls[combo.wall.row][combo.wall.col] = true;
+            const ended = checkGameEnd(); const w = winner;
+            const diff = ended ? (countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2)) : 0;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = false;
+            else vWalls[combo.wall.row][combo.wall.col] = false;
+            gameOver = false; winner = null;
+            if (ended && w === 'P2') { if (diff > maxWinDiff) { maxWinDiff = diff; bestWin = combo; } continue; }
+            if (ended && w !== 'P2') { suicidalWithDiffs.push({ combo, diff }); continue; }
+            nonSuicidal.push(combo);
+        }
+        if (bestWin) return { move: bestWin.move, wall: bestWin.wall };
+        let bestTwoStep = null; let maxTwoStepDiff = -Infinity;
+        for (const combo of nonSuicidal) {
+            if (isTwoStepKill(combo.move, combo.wall)) {
+                const saved2 = cloneState();
+                P2.row = combo.move.row; P2.col = combo.move.col;
+                if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+                else vWalls[combo.wall.row][combo.wall.col] = true;
+                const diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
+                restoreState(saved2); gameOver=false; winner=null;
+                if (diff > maxTwoStepDiff) { maxTwoStepDiff = diff; bestTwoStep = combo; }
+            }
+        }
+        if (bestTwoStep) return { move: bestTwoStep.move, wall: bestTwoStep.wall };
+        const scoredCombos = []; const saved = cloneState();
+        for (const combo of nonSuicidal) {
+            P2.row = combo.move.row; P2.col = combo.move.col;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+            else vWalls[combo.wall.row][combo.wall.col] = true;
+            checkGameEnd();
+            const score = minimax(desiredDepth - 1, -Infinity, Infinity, false);
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = false;
+            else vWalls[combo.wall.row][combo.wall.col] = false;
+            gameOver = false; winner = null;
+            scoredCombos.push({ combo, score });
+        }
+        restoreState(saved); gameOver=false; winner=null;
+        scoredCombos.sort((a, b) => b.score - a.score);
+        for (const item of scoredCombos) {
+            if (!isOpponentOneStepKill(item.combo.move, item.combo.wall)) {
+                return { move: item.combo.move, wall: item.combo.wall };
+            }
+        }
+        if (scoredCombos.length === 0 && suicidalWithDiffs.length > 0) {
+            suicidalWithDiffs.sort((a, b) => b.diff - a.diff);
+            const best = suicidalWithDiffs[0];
+            return { move: best.combo.move, wall: best.combo.wall };
+        }
+        if (scoredCombos.length > 0) return { move: scoredCombos[0].combo.move, wall: scoredCombos[0].combo.wall };
+        return null;
+    }
+
+    function getAIDepth() {
+        const rand = Math.random();
+        if (aiDifficulty === 'beginner') return 2;
+        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 3 : 2;
+        if (aiDifficulty === 'advanced') return 3;
+        if (aiDifficulty === 'expert') return 4;
+        return 4;
+    }
+
+    function triggerAI() {
+        if (gameOver || gameMode !== 'ai' || currentPlayer !== P2 || aiThinking) return;
+        aiThinking = true;
+        updateUI();
+        const depth = getAIDepth();
+        let delay = 0;
+        if (aiDifficulty !== 'beginner') {
+            let minTime = 0.25, maxTime = 0.75;
+            if (round > 10 && round <= 20) { minTime = 0.5; maxTime = 1.0; }
+            delay = minTime + Math.random() * (maxTime - minTime);
+        }
+        aiTimer = setTimeout(() => {
+            const result = aiFindBestMove(depth);
+            if (result && result.move && result.wall) {
+                P2.row = result.move.row; P2.col = result.move.col;
+                if (result.wall.dir === 'h') hWalls[result.wall.row][result.wall.col] = true;
+                else vWalls[result.wall.row][result.wall.col] = true;
+                if (checkGameEnd()) { updateUI(); showEndModal(); aiThinking = false; drawBoard(); return; }
+                switchPlayer();
+            } else { switchPlayer(true); }
+            aiThinking = false;
+            updateUI();
+            drawBoard();
+        }, delay * 1000);
+    }
+
+    // ---------- 技能触发 ----------
+    function useSkill() {
+        if (gameOver) return;
+        const player = currentPlayer;
+        const char = player.char;
+        if (char.skillType === 'none' || char.skillType === 'passive') return;
+        let alreadyUsed = (player === P1) ? skillUsedP1 : skillUsedP2;
+        if (alreadyUsed) return;
+        if (char.skillType === 'active_move') {
+            if (phase !== 'move') return;
+            if (player === P1) skillUsedP1 = true; else skillUsedP2 = true;
+            updateValidActions();
+            updateUI();
+            drawBoard();
+        } else if (char.skillType === 'active_wall') {
+            if (phase !== 'wall') return;
+            if (player === P1) { skillUsedP1 = true; extraWallActive = true; }
+            else { skillUsedP2 = true; extraWallActive = true; }
+            updateUI();
+        } else if (char.skillType === 'active_skipwall') {
+            if (phase !== 'move') return;
+            if (player === P1) skillUsedP1 = true; else skillUsedP2 = true;
+            updateUI();
+        }
+    }
+    window._useSkill = useSkill;
+
+    // ---------- 键盘与触摸 ----------
+    function handleMoveConfirm() { if (phase!=='move'||gameOver||aiThinking) return; const target=validMoves.find(m=>m.row===cursor.row&&m.col===cursor.col); if(target){movePlayer(target.row,target.col);drawBoard();} }
+    function handleWallConfirm() { if (phase!=='wall'||gameOver||aiThinking) return; if(!wallCursor)return; const w=validWalls.find(v=>v.row===wallCursor.row&&v.col===wallCursor.col&&v.dir===wallCursor.dir); if(w){placeWall(w.row,w.col,w.dir);drawBoard();} }
+
+    document.addEventListener('keydown', (e) => {
+        if (gameOver || aiThinking) return;
+        const key = e.key; e.preventDefault();
+        if (key === 'Escape') { document.getElementById('pauseModal').classList.add('active'); return; }
+        if (phase === 'move') {
+            if (key==='ArrowUp'||key==='w'||key==='W') cursor.row = Math.max(0, cursor.row-1);
+            else if (key==='ArrowDown'||key==='s'||key==='S') cursor.row = Math.min(SIZE-1, cursor.row+1);
+            else if (key==='ArrowLeft'||key==='a'||key==='A') cursor.col = Math.max(0, cursor.col-1);
+            else if (key==='ArrowRight'||key==='d'||key==='D') cursor.col = Math.min(SIZE-1, cursor.col+1);
+            else if (key===' ') { handleMoveConfirm(); return; }
+            drawBoard();
+        } else if (phase === 'wall') {
+            if (key === 'r' || key === 'R') { cancelWall(); return; }
+            const dirMap = { 'ArrowUp':{dir:'h',dr:-1,dc:0}, 'ArrowDown':{dir:'h',dr:0,dc:0}, 'ArrowLeft':{dir:'v',dr:0,dc:-1}, 'ArrowRight':{dir:'v',dr:0,dc:0}, 'w':{dir:'h',dr:-1,dc:0},'W':{dir:'h',dr:-1,dc:0},'s':{dir:'h',dr:0,dc:0},'S':{dir:'h',dr:0,dc:0},'a':{dir:'v',dr:0,dc:-1},'A':{dir:'v',dr:0,dc:-1},'d':{dir:'v',dr:0,dc:0},'D':{dir:'v',dr:0,dc:0} };
+            const d = dirMap[key];
+            if (d) {
+                const r=currentPlayer.row, c=currentPlayer.col;
+                let tr = (d.dir==='h')? (d.dr<0?r-1:r) : r;
+                let tc = (d.dir==='h')? c : (d.dc<0?c-1:c);
+                const found = validWalls.find(v=>v.row===tr&&v.col===tc&&v.dir===d.dir);
+                if (found) { wallCursor = found; drawBoard(); }
+                return;
+            }
+            if (key === ' ') { handleWallConfirm(); return; }
+        }
+    });
+
+    canvas.addEventListener('click', (e) => {
+        if (gameOver||aiThinking) return;
+        const rect=canvas.getBoundingClientRect(), scaleX=BOARD_PX/rect.width, scaleY=BOARD_PX/rect.height;
+        const mouseX=(e.clientX-rect.left)*scaleX, mouseY=(e.clientY-rect.top)*scaleY;
+        const col=Math.floor(mouseX/CELL), row=Math.floor(mouseY/CELL);
+        if (col<0||col>=SIZE||row<0||row>=SIZE) return;
+        if (phase==='move') { const target=validMoves.find(m=>m.row===row&&m.col===col); if(target){movePlayer(row,col);drawBoard();} }
+        else if (phase==='wall') {
+            const xInCell=mouseX-col*CELL, yInCell=mouseY-row*CELL, threshold=12;
+            let dir=null,wr=row,wc=col;
+            if(yInCell<threshold&&row>0){dir='h';wr=row-1;wc=col;}
+            else if(yInCell>CELL-threshold&&row<SIZE-1){dir='h';wr=row;wc=col;}
+            else if(xInCell<threshold&&col>0){dir='v';wr=row;wc=col-1;}
+            else if(xInCell>CELL-threshold&&col<SIZE-1){dir='v';wr=row;wc=col;}
+            if(dir){ const valid=validWalls.find(v=>v.row===wr&&v.col===wc&&v.dir===dir); if(valid){placeWall(wr,wc,dir);drawBoard();} }
+        }
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', ()=>{ if(aiTimer) clearTimeout(aiTimer); resetGame(); });
+    document.getElementById('resumeBtn').addEventListener('click', ()=>document.getElementById('pauseModal').classList.remove('active'));
+    document.getElementById('resetFromPauseBtn').addEventListener('click', ()=>{ if(aiTimer) clearTimeout(aiTimer); resetGame(); });
+    document.getElementById('closeEndBtn').addEventListener('click', ()=>{ document.getElementById('endModal').classList.remove('active'); showScoreModal(); });
+    document.getElementById('closeScoreBtn').addEventListener('click', ()=>document.getElementById('scoreModal').classList.remove('active'));
+
+    // ---------- 角色选择逻辑 ----------
+    function showCharSelect() {
+        const grid = document.getElementById('character-grid');
+        grid.innerHTML = CHARACTERS.map(c => `
+            <div class="character-card" onclick="window._selectChar('${c.id}')" data-id="${c.id}">
+                <img src="${c.img}" alt="${c.name}">
+                <div style="font-weight:bold;margin-top:5px;">${c.name}</div>
+                <div style="font-size:0.75rem;color:#aaa;">${c.skillName}: ${c.skillDesc}</div>
+            </div>
+        `).join('');
+        document.getElementById('char-select-screen').style.visibility = 'visible';
+        document.getElementById('char-select-title').textContent = (selectingPlayer === 'P1') ? '红方选择角色' : '蓝方选择角色';
+    }
+
+    window._selectChar = function(id) {
+        const char = CHARACTERS.find(c => c.id === id);
+        if (!char) return;
+        if (selectingPlayer === 'P1') {
+            P1.char = char;
+            P1.img = new Image(); P1.img.src = char.img;
+            P1.name = '红方（'+char.name+'）';
+            if (gameMode === 'ai') {
+                // 人机：P2自动随机
+                const randomChar = CHARACTERS[Math.floor(Math.random()*CHARACTERS.length)];
+                P2.char = randomChar;
+                P2.img = new Image(); P2.img.src = randomChar.img;
+                P2.name = '蓝方（'+randomChar.name+'）';
+                document.getElementById('char-select-screen').style.visibility = 'hidden';
+                document.getElementById('difficulty-screen').style.visibility = 'visible';
+                return;
+            }
+            selectingPlayer = 'P2';
+            showCharSelect();
+        } else if (selectingPlayer === 'P2') {
+            P2.char = char;
+            P2.img = new Image(); P2.img.src = char.img;
+            P2.name = '蓝方（'+char.name+'）';
+            document.getElementById('char-select-screen').style.visibility = 'hidden';
+            document.getElementById('game-screen').style.display = 'flex';
+            resetGame();
+        }
+    };
+
+    document.getElementById('random-char-btn').addEventListener('click', () => {
+        const randomIndex = Math.floor(Math.random() * CHARACTERS.length);
+        window._selectChar(CHARACTERS[randomIndex].id);
+    });
+
+    document.getElementById('twoPlayerBtn').addEventListener('click', ()=>{
+        gameMode = 'pvp';
+        selectingPlayer = 'P1';
+        document.getElementById('mode-screen').classList.remove('active');
+        showCharSelect();
+    });
+
+    document.getElementById('aiPlayerBtn').addEventListener('click', ()=>{
+        gameMode = 'ai';
+        selectingPlayer = 'P1';
+        document.getElementById('mode-screen').classList.remove('active');
+        showCharSelect();
+    });
+
+    function startAIGame(diff) {
+        aiDifficulty = diff;
+        document.getElementById('difficulty-screen').style.visibility = 'hidden';
+        document.getElementById('game-screen').style.display = 'flex';
+        resetGame();
+    }
+
+    document.getElementById('diff1Btn').addEventListener('click', ()=> startAIGame('beginner'));
+    document.getElementById('diff2Btn').addEventListener('click', ()=> startAIGame('intermediate'));
+    document.getElementById('diff3Btn').addEventListener('click', ()=> startAIGame('advanced'));
+    document.getElementById('diff4Btn').addEventListener('click', ()=> startAIGame('expert'));
+
+    document.getElementById('backToModeBtn').addEventListener('click', ()=>{
+        if (aiTimer) clearTimeout(aiTimer);
+        aiThinking = false;
+        resetGame();
+        document.getElementById('game-screen').style.display = 'none';
+        document.getElementById('mode-screen').classList.add('active');
+    });
+
+    updateValidActions(); resetCursorToPlayer(); updateUI(); drawBoard();
+})();
+</script>
+</body>
+</html>
