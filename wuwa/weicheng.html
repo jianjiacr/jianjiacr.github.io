@@ -571,7 +571,6 @@
     }
 
     function getAIValidMoves(player) {
-        const combos = getAllMoveWallCombos(player);
         const opponent = (player === P1) ? P2 : P1;
         const moves = getReachableCells(player.row, player.col, 3, opponent);
         return moves.map(m => {
@@ -680,6 +679,36 @@
         return true;
     }
 
+    // 新增：检查AI执行某步后，对手能否一步获胜
+    function isOpponentOneStepKill(move, wall) {
+        const saved = cloneState();
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        // 检查是否已经结束（AI已经获胜不应再检查，但这里我们只用于非立即获胜的走法）
+        if (checkGameEnd()) {
+            restoreState(saved);
+            return false; // 已结束，不属于一步杀范畴
+        }
+        const opponentCombos = getAllMoveWallCombos(P1);
+        let result = false;
+        for (const oppCombo of opponentCombos) {
+            const oppSaved = cloneState();
+            P1.row = oppCombo.move.row; P1.col = oppCombo.move.col;
+            if (oppCombo.wall.dir === 'h') hWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            else vWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            const ended = checkGameEnd();
+            const isLoss = (winner === 'P1'); // AI失败
+            restoreState(oppSaved);
+            if (ended && isLoss) {
+                result = true;
+                break;
+            }
+        }
+        restoreState(saved);
+        return result;
+    }
+
     function aiFindBestMove(desiredDepth) {
         const allCombos = getAllMoveWallCombos(P2);
         if (allCombos.length === 0) return null;
@@ -736,7 +765,8 @@
         }
         if (bestTwoStep) return { move: bestTwoStep.move, wall: bestTwoStep.wall };
 
-        let bestMove = null, bestWall = null, bestScore = -Infinity;
+        // 常规搜索，排序后过滤反杀
+        const scoredCombos = [];
         const saved = cloneState();
         for (const combo of nonSuicidal) {
             P2.row = combo.move.row; P2.col = combo.move.col;
@@ -747,30 +777,41 @@
             if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = false;
             else vWalls[combo.wall.row][combo.wall.col] = false;
             gameOver = false; winner = null;
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = combo.move;
-                bestWall = combo.wall;
-            }
+            scoredCombos.push({ combo, score });
         }
         restoreState(saved);
 
-        if (!bestMove && suicidalWithDiffs.length > 0) {
-            suicidalWithDiffs.sort((a,b) => b.diff - a.diff);
+        scoredCombos.sort((a, b) => b.score - a.score);
+
+        // 过滤掉会被对手一步杀的走法
+        for (const item of scoredCombos) {
+            if (!isOpponentOneStepKill(item.combo.move, item.combo.wall)) {
+                return { move: item.combo.move, wall: item.combo.wall };
+            }
+        }
+
+        // 所有非自杀走法都会被一步杀，回退到自杀走法中选输得最少的
+        if (scoredCombos.length === 0 && suicidalWithDiffs.length > 0) {
+            suicidalWithDiffs.sort((a, b) => b.diff - a.diff);
             const best = suicidalWithDiffs[0];
             return { move: best.combo.move, wall: best.combo.wall };
         }
 
-        return { move: bestMove, wall: bestWall };
+        // 如果所有非自杀走法都会被一步杀，则选分数最高的（即第一个）
+        if (scoredCombos.length > 0) {
+            return { move: scoredCombos[0].combo.move, wall: scoredCombos[0].combo.wall };
+        }
+
+        return null;
     }
 
     // ★ 最终难度概率 ★
     function getAIDepth() {
         const rand = Math.random();
-        if (aiDifficulty === 'beginner') return 2;                          // 100%深度2
-        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 3 : 2;    // 50%深度3，50%深度2
-        if (aiDifficulty === 'advanced') return 3;                          // 100%深度3
-        if (aiDifficulty === 'expert') return 4;                            // 100%深度4
+        if (aiDifficulty === 'beginner') return 2;
+        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 3 : 2;
+        if (aiDifficulty === 'advanced') return 3;
+        if (aiDifficulty === 'expert') return 4;
         return 4;
     }
 
