@@ -322,7 +322,6 @@
         return false;
     }
 
-    // 计算到各格子的最短距离（BFS，无法穿过对手棋子）
     function computeDistances(player, opponent) {
         const dist = Array(SIZE).fill().map(() => Array(SIZE).fill(Infinity));
         const queue = [[player.row, player.col, 0]];
@@ -332,7 +331,6 @@
             for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
                 let nr = r + dr, nc = c + dc;
                 if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && dist[nr][nc] > d + 1 && canMoveTo(r, c, nr, nc)) {
-                    // 不能进入对手棋子所在格子
                     if (nr === opponent.row && nc === opponent.col) continue;
                     dist[nr][nc] = d + 1;
                     queue.push([nr, nc, d + 1]);
@@ -363,7 +361,6 @@
         if (opp.row === 0 || opp.row === SIZE-1) score += 5;
         if (opp.col === 0 || opp.col === SIZE-1) score += 5;
 
-        // 区域控制：计算每格归属
         const myDist = computeDistances(player, opp);
         const oppDist = computeDistances(opp, player);
         let controlled = 0;
@@ -687,14 +684,12 @@
         const allCombos = getAllMoveWallCombos(P2);
         if (allCombos.length === 0) return null;
 
-        // 1. 立即获胜优先，选择格子差最大的
         let bestWin = null;
         let maxWinDiff = -Infinity;
         const nonSuicidal = [];
         const suicidalWithDiffs = [];
 
         for (const combo of allCombos) {
-            // 模拟执行
             P2.row = combo.move.row; P2.col = combo.move.col;
             if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
             else vWalls[combo.wall.row][combo.wall.col] = true;
@@ -706,27 +701,23 @@
             gameOver = false; winner = null;
 
             if (ended && w === 'P2') {
-                // 必胜步骤
                 if (diff > maxWinDiff) {
                     maxWinDiff = diff;
                     bestWin = combo;
                 }
-                continue; // 已经计入必胜，不再参与常规选择
+                continue;
             }
 
             if (ended && w !== 'P2') {
-                // 自杀步骤
                 suicidalWithDiffs.push({ combo, diff });
                 continue;
             }
 
-            // 非结束步骤
             nonSuicidal.push(combo);
         }
 
         if (bestWin) return { move: bestWin.move, wall: bestWin.wall };
 
-        // 2. 两步必杀（仅在非自杀步骤中查找）
         let bestTwoStep = null;
         let maxTwoStepDiff = -Infinity;
         for (const combo of nonSuicidal) {
@@ -745,7 +736,6 @@
         }
         if (bestTwoStep) return { move: bestTwoStep.move, wall: bestTwoStep.wall };
 
-        // 3. 常规搜索（仅非自杀步骤）
         let bestMove = null, bestWall = null, bestScore = -Infinity;
         const saved = cloneState();
         for (const combo of nonSuicidal) {
@@ -765,7 +755,6 @@
         }
         restoreState(saved);
 
-        // 如果非自杀步骤为空，则从所有步骤中选负分最大（即输最少的）
         if (!bestMove && suicidalWithDiffs.length > 0) {
             suicidalWithDiffs.sort((a,b) => b.diff - a.diff);
             const best = suicidalWithDiffs[0];
@@ -775,12 +764,13 @@
         return { move: bestMove, wall: bestWall };
     }
 
+    // ★ 最终难度概率 ★
     function getAIDepth() {
         const rand = Math.random();
-        if (aiDifficulty === 'beginner') return 2;
-        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 4 : 2;
-        if (aiDifficulty === 'advanced') return rand < 0.5 ? 4 : 3;
-        if (aiDifficulty === 'expert') return 4;
+        if (aiDifficulty === 'beginner') return 2;                          // 100%深度2
+        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 3 : 2;    // 50%深度3，50%深度2
+        if (aiDifficulty === 'advanced') return 3;                          // 100%深度3
+        if (aiDifficulty === 'expert') return 4;                            // 100%深度4
         return 4;
     }
 
