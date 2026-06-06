@@ -382,8 +382,8 @@
         phase = 'move';
         if (currentPlayer === P1) {
             round++;
-            const p1Score = evaluateForPlayer(P1);
-            const p2Score = evaluateForPlayer(P2);
+            const p1Score = Math.round(evaluateForPlayer(P1));
+            const p2Score = Math.round(evaluateForPlayer(P2));
             scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
         }
         updateValidActions();
@@ -399,8 +399,8 @@
                 else if (r2 > r1) winner = 'P2';
                 else winner = 'draw';
                 if (currentPlayer === P1) {
-                    const p1Score = evaluateForPlayer(P1);
-                    const p2Score = evaluateForPlayer(P2);
+                    const p1Score = Math.round(evaluateForPlayer(P1));
+                    const p2Score = Math.round(evaluateForPlayer(P2));
                     scoreHistory.push({ round: round-1, p1: p1Score, p2: p2Score });
                 }
             } else {
@@ -544,7 +544,7 @@
         drawBoard();
     }
 
-    // ---------- AI 增强版 (含反一步杀) ----------
+    // ---------- AI 增强版 (状态安全) ----------
     function cloneState() {
         return { hWalls: hWalls.map(r=>[...r]), vWalls: vWalls.map(r=>[...r]), p1:{row:P1.row,col:P1.col}, p2:{row:P2.row,col:P2.col} };
     }
@@ -614,6 +614,7 @@
             current.row = saved.p2.row; current.col = saved.p2.col;
         }
         restoreState(saved);
+        gameOver = false; winner = null;
         return bestScore;
     }
 
@@ -640,6 +641,7 @@
         else vWalls[wall.row][wall.col] = true;
         if (checkGameEnd()) {
             restoreState(saved);
+            gameOver = false; winner = null;
             return false;
         }
         const opponentMoves = getAllMoveWallCombos(P1);
@@ -651,6 +653,7 @@
                 if (win) { canWin = true; break; }
             }
             restoreState(saved);
+            gameOver = false; winner = null;
             return canWin;
         }
         for (const oppCombo of opponentMoves) {
@@ -661,6 +664,7 @@
             if (checkGameEnd()) {
                 restoreState(oppSaved);
                 restoreState(saved);
+                gameOver = false; winner = null;
                 return false;
             }
             const aiMoves = getAllMoveWallCombos(P2);
@@ -670,16 +674,18 @@
                 if (win) { aiCanWin = true; break; }
             }
             restoreState(oppSaved);
+            gameOver = false; winner = null;
             if (!aiCanWin) {
                 restoreState(saved);
+                gameOver = false; winner = null;
                 return false;
             }
         }
         restoreState(saved);
+        gameOver = false; winner = null;
         return true;
     }
 
-    // 检查AI执行某步后，对手能否一步获胜
     function isOpponentOneStepKill(move, wall) {
         const saved = cloneState();
         P2.row = move.row; P2.col = move.col;
@@ -687,6 +693,7 @@
         else vWalls[wall.row][wall.col] = true;
         if (checkGameEnd()) {
             restoreState(saved);
+            gameOver = false; winner = null;
             return false;
         }
         const opponentCombos = getAllMoveWallCombos(P1);
@@ -699,12 +706,14 @@
             const ended = checkGameEnd();
             const isLoss = (winner === 'P1');
             restoreState(oppSaved);
+            gameOver = false; winner = null;
             if (ended && isLoss) {
                 result = true;
                 break;
             }
         }
         restoreState(saved);
+        gameOver = false; winner = null;
         return result;
     }
 
@@ -756,6 +765,7 @@
                 else vWalls[combo.wall.row][combo.wall.col] = true;
                 const diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
                 restoreState(saved2);
+                gameOver = false; winner = null;
                 if (diff > maxTwoStepDiff) {
                     maxTwoStepDiff = diff;
                     bestTwoStep = combo;
@@ -764,7 +774,6 @@
         }
         if (bestTwoStep) return { move: bestTwoStep.move, wall: bestTwoStep.wall };
 
-        // 常规搜索，排序后过滤反杀
         const scoredCombos = [];
         const saved = cloneState();
         for (const combo of nonSuicidal) {
@@ -779,24 +788,22 @@
             scoredCombos.push({ combo, score });
         }
         restoreState(saved);
+        gameOver = false; winner = null;
 
         scoredCombos.sort((a, b) => b.score - a.score);
 
-        // 过滤掉会被对手一步杀的走法
         for (const item of scoredCombos) {
             if (!isOpponentOneStepKill(item.combo.move, item.combo.wall)) {
                 return { move: item.combo.move, wall: item.combo.wall };
             }
         }
 
-        // 所有非自杀走法都会被一步杀，回退到自杀走法中选输得最少的
         if (scoredCombos.length === 0 && suicidalWithDiffs.length > 0) {
             suicidalWithDiffs.sort((a, b) => b.diff - a.diff);
             const best = suicidalWithDiffs[0];
             return { move: best.combo.move, wall: best.combo.wall };
         }
 
-        // 如果所有非自杀走法都会被一步杀，则选分数最高的（即第一个）
         if (scoredCombos.length > 0) {
             return { move: scoredCombos[0].combo.move, wall: scoredCombos[0].combo.wall };
         }
@@ -804,7 +811,6 @@
         return null;
     }
 
-    // ★ 最终难度概率 ★
     function getAIDepth() {
         const rand = Math.random();
         if (aiDifficulty === 'beginner') return 2;
