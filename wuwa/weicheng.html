@@ -119,7 +119,7 @@
                 <li>2. 不穿墙、墙不越界、不踩对方棋子</li>
                 <li>3. 墙阻断所有通路即为游戏结束</li>
                 <li>4. 可达格子多者胜，相等则平局</li>
-                <li>5. 方向键/WASD移动光标，空格切换模式并确认，R退出放墙，ESC暂停</li>
+                <li>5. 方向键/WASD移动光标，空格确认，R返回移动阶段并复位，ESC暂停</li>
             </ul>
         </div>
     </div>
@@ -180,6 +180,9 @@
     let skipMessage = '';
     let aiThinking = false;
     let aiTimer = null;
+
+    // ★ 记录移动前的初始位置
+    let moveStartPos = { row: 0, col: 0 };
 
     let hWalls = Array(SIZE-1).fill().map(() => Array(SIZE).fill(false));
     let vWalls = Array(SIZE).fill().map(() => Array(SIZE-1).fill(false));
@@ -422,7 +425,12 @@
         wallCursor = validWalls.length > 0 ? validWalls[0] : null;
     }
 
+    // ★ 移动时记录初始位置
     function movePlayer(targetRow, targetCol) {
+        // 记录移动前的位置
+        moveStartPos.row = currentPlayer.row;
+        moveStartPos.col = currentPlayer.col;
+        // 执行移动
         currentPlayer.row = targetRow;
         currentPlayer.col = targetCol;
         phase = 'wall';
@@ -435,6 +443,17 @@
             showEndModal();
             return;
         }
+        updateUI();
+        drawBoard();
+    }
+
+    // ★ 取消放墙，回到移动前的位置
+    function cancelWall() {
+        currentPlayer.row = moveStartPos.row;
+        currentPlayer.col = moveStartPos.col;
+        phase = 'move';
+        updateValidActions();
+        resetCursorToPlayer();
         updateUI();
         drawBoard();
     }
@@ -537,6 +556,7 @@
 
     function resetGame() {
         P1.row=0;P1.col=0;P2.row=6;P2.col=6; currentPlayer=P1; phase='move'; round=1; gameOver=false; winner=null; skipMessage=''; aiThinking=false;
+        moveStartPos.row = 0; moveStartPos.col = 0;
         hWalls=Array(SIZE-1).fill().map(()=>Array(SIZE).fill(false)); vWalls=Array(SIZE).fill().map(()=>Array(SIZE-1).fill(false));
         scoreHistory = [];
         updateValidActions(); resetCursorToPlayer(); updateUI();
@@ -867,7 +887,8 @@
             else if (key === ' ') { handleMoveConfirm(); return; }
             drawBoard();
         } else if (phase === 'wall') {
-            if (key === 'r' || key === 'R') { phase = 'move'; updateUI(); drawBoard(); return; }
+            // ★ 按下 R 返回移动阶段并复位
+            if (key === 'r' || key === 'R') { cancelWall(); return; }
             const dirMap = {
                 'ArrowUp':   { dir:'h', dr:-1, dc: 0 },
                 'ArrowDown': { dir:'h', dr: 0, dc: 0 },
