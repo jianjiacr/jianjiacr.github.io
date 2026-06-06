@@ -544,7 +544,7 @@
         drawBoard();
     }
 
-    // ---------- 人机增强版 ----------
+    // ---------- AI 增强版 (含反一步杀) ----------
     function cloneState() {
         return { hWalls: hWalls.map(r=>[...r]), vWalls: vWalls.map(r=>[...r]), p1:{row:P1.row,col:P1.col}, p2:{row:P2.row,col:P2.col} };
     }
@@ -679,16 +679,15 @@
         return true;
     }
 
-    // 新增：检查AI执行某步后，对手能否一步获胜
+    // 检查AI执行某步后，对手能否一步获胜
     function isOpponentOneStepKill(move, wall) {
         const saved = cloneState();
         P2.row = move.row; P2.col = move.col;
         if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
         else vWalls[wall.row][wall.col] = true;
-        // 检查是否已经结束（AI已经获胜不应再检查，但这里我们只用于非立即获胜的走法）
         if (checkGameEnd()) {
             restoreState(saved);
-            return false; // 已结束，不属于一步杀范畴
+            return false;
         }
         const opponentCombos = getAllMoveWallCombos(P1);
         let result = false;
@@ -698,7 +697,7 @@
             if (oppCombo.wall.dir === 'h') hWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
             else vWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
             const ended = checkGameEnd();
-            const isLoss = (winner === 'P1'); // AI失败
+            const isLoss = (winner === 'P1');
             restoreState(oppSaved);
             if (ended && isLoss) {
                 result = true;
@@ -751,12 +750,12 @@
         let maxTwoStepDiff = -Infinity;
         for (const combo of nonSuicidal) {
             if (isTwoStepKill(combo.move, combo.wall)) {
-                const saved = cloneState();
+                const saved2 = cloneState();
                 P2.row = combo.move.row; P2.col = combo.move.col;
                 if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
                 else vWalls[combo.wall.row][combo.wall.col] = true;
                 const diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
-                restoreState(saved);
+                restoreState(saved2);
                 if (diff > maxTwoStepDiff) {
                     maxTwoStepDiff = diff;
                     bestTwoStep = combo;
