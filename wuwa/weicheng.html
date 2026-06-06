@@ -150,7 +150,7 @@
 <!-- 分数报告 -->
 <div class="modal" id="scoreModal">
     <div class="modal-content" style="max-width:500px">
-        <h2>📊 比赛数据（仅用于调试）</h2>
+        <h2>📊 比赛数据</h2>
         <div id="scoreContent"></div>
         <button id="closeScoreBtn">确定</button>
     </div>
@@ -322,6 +322,26 @@
         return false;
     }
 
+    // 计算到各格子的最短距离（BFS，无法穿过对手棋子）
+    function computeDistances(player, opponent) {
+        const dist = Array(SIZE).fill().map(() => Array(SIZE).fill(Infinity));
+        const queue = [[player.row, player.col, 0]];
+        dist[player.row][player.col] = 0;
+        while (queue.length) {
+            const [r, c, d] = queue.shift();
+            for (let [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                let nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE && dist[nr][nc] > d + 1 && canMoveTo(r, c, nr, nc)) {
+                    // 不能进入对手棋子所在格子
+                    if (nr === opponent.row && nc === opponent.col) continue;
+                    dist[nr][nc] = d + 1;
+                    queue.push([nr, nc, d + 1]);
+                }
+            }
+        }
+        return dist;
+    }
+
     function evaluateForPlayer(player) {
         const opp = (player === P1) ? P2 : P1;
         const myRegion = countRegion(player.row, player.col, opp);
@@ -342,6 +362,19 @@
         if (player.col === 0 || player.col === SIZE-1) score -= 5;
         if (opp.row === 0 || opp.row === SIZE-1) score += 5;
         if (opp.col === 0 || opp.col === SIZE-1) score += 5;
+
+        // 区域控制：计算每格归属
+        const myDist = computeDistances(player, opp);
+        const oppDist = computeDistances(opp, player);
+        let controlled = 0;
+        for (let r = 0; r < SIZE; r++) {
+            for (let c = 0; c < SIZE; c++) {
+                if (myDist[r][c] === Infinity && oppDist[r][c] === Infinity) continue;
+                if (myDist[r][c] < oppDist[r][c]) controlled++;
+                else if (oppDist[r][c] < myDist[r][c]) controlled--;
+            }
+        }
+        score += controlled * 1.2;
         return score;
     }
 
@@ -526,16 +559,31 @@
 
     function evaluateForAI() { return evaluateForPlayer(P2); }
 
-    function getAIValidMoves(player) {
+    function getAllMoveWallCombos(player) {
         const opponent = (player === P1) ? P2 : P1;
         const moves = getReachableCells(player.row, player.col, 3, opponent);
-        return moves.map(m=>{
+        const combos = [];
+        moves.forEach(m => {
+            const origR = player.row, origC = player.col;
+            player.row = m.row; player.col = m.col;
+            const walls = getNeighborWalls(player);
+            player.row = origR; player.col = origC;
+            walls.forEach(w => combos.push({ move: m, wall: w }));
+        });
+        return combos;
+    }
+
+    function getAIValidMoves(player) {
+        const combos = getAllMoveWallCombos(player);
+        const opponent = (player === P1) ? P2 : P1;
+        const moves = getReachableCells(player.row, player.col, 3, opponent);
+        return moves.map(m => {
             const origR = player.row, origC = player.col;
             player.row = m.row; player.col = m.col;
             const walls = getNeighborWalls(player);
             player.row = origR; player.col = origC;
             return { move: m, walls };
-        }).filter(x=> x.walls.length > 0);
+        }).filter(x => x.walls.length > 0);
     }
 
     function minimax(depth, alpha, beta, maximizing) {
@@ -573,62 +621,166 @@
         return bestScore;
     }
 
-    function aiFindBestMove(desiredDepth) {
-        const moves = getAIValidMoves(P2);
-        if (moves.length === 0) return null;
-        if (desiredDepth === 2) {
-            for (const { move, walls } of moves) {
-                P2.row = move.row; P2.col = move.col;
-                for (const w of walls) {
-                    if (w.dir === 'h') hWalls[w.row][w.col] = true;
-                    else vWalls[w.row][w.col] = true;
-                    const ended = checkGameEnd();
-                    const isWin = (winner === 'P2');
-                    if (w.dir === 'h') hWalls[w.row][w.col] = false;
-                    else vWalls[w.row][w.col] = false;
-                    gameOver = false; winner = null;
-                    if (ended && isWin) {
-                        P2.row = move.row; P2.col = move.col;
-                        if (w.dir === 'h') hWalls[w.row][w.col] = true;
-                        else vWalls[w.row][w.col] = true;
-                        return { move, wall: w, immediate: true };
-                    }
-                }
-                P2.row = cloneState().p2.row; P2.col = cloneState().p2.col;
-            }
+    function immediateWinInfo(move, wall) {
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        const ended = checkGameEnd();
+        const isWin = (winner === 'P2');
+        let diff = 0;
+        if (ended && isWin) {
+            diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
         }
-        let bestMove = null, bestWall = null, bestScore = -Infinity;
-        let backupMove = null, backupWall = null, backupScore = -Infinity;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = false;
+        else vWalls[wall.row][wall.col] = false;
+        gameOver = false; winner = null;
+        return { win: ended && isWin, diff };
+    }
+
+    function isTwoStepKill(move, wall) {
         const saved = cloneState();
-        for (const { move, walls } of moves) {
-            P2.row = move.row; P2.col = move.col;
-            for (const w of walls) {
-                if (w.dir === 'h') hWalls[w.row][w.col] = true;
-                else vWalls[w.row][w.col] = true;
-                checkGameEnd();
-                const score = minimax(desiredDepth - 1, -Infinity, Infinity, false);
-                if (w.dir === 'h') hWalls[w.row][w.col] = false;
-                else vWalls[w.row][w.col] = false;
-                gameOver = false; winner = null;
-                if (score > -10000) {
-                    if (score > bestScore) { bestScore = score; bestMove = move; bestWall = w; }
-                } else {
-                    if (score > backupScore) { backupScore = score; backupMove = move; backupWall = w; }
-                }
+        P2.row = move.row; P2.col = move.col;
+        if (wall.dir === 'h') hWalls[wall.row][wall.col] = true;
+        else vWalls[wall.row][wall.col] = true;
+        if (checkGameEnd()) {
+            restoreState(saved);
+            return false;
+        }
+        const opponentMoves = getAllMoveWallCombos(P1);
+        if (opponentMoves.length === 0) {
+            const aiMoves = getAllMoveWallCombos(P2);
+            let canWin = false;
+            for (const aiCombo of aiMoves) {
+                const { win } = immediateWinInfo(aiCombo.move, aiCombo.wall);
+                if (win) { canWin = true; break; }
             }
-            P2.row = saved.p2.row; P2.col = saved.p2.col;
+            restoreState(saved);
+            return canWin;
+        }
+        for (const oppCombo of opponentMoves) {
+            const oppSaved = cloneState();
+            P1.row = oppCombo.move.row; P1.col = oppCombo.move.col;
+            if (oppCombo.wall.dir === 'h') hWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            else vWalls[oppCombo.wall.row][oppCombo.wall.col] = true;
+            if (checkGameEnd()) {
+                restoreState(oppSaved);
+                restoreState(saved);
+                return false;
+            }
+            const aiMoves = getAllMoveWallCombos(P2);
+            let aiCanWin = false;
+            for (const aiCombo of aiMoves) {
+                const { win } = immediateWinInfo(aiCombo.move, aiCombo.wall);
+                if (win) { aiCanWin = true; break; }
+            }
+            restoreState(oppSaved);
+            if (!aiCanWin) {
+                restoreState(saved);
+                return false;
+            }
         }
         restoreState(saved);
-        if (!bestMove && backupMove) return { move: backupMove, wall: backupWall };
+        return true;
+    }
+
+    function aiFindBestMove(desiredDepth) {
+        const allCombos = getAllMoveWallCombos(P2);
+        if (allCombos.length === 0) return null;
+
+        // 1. 立即获胜优先，选择格子差最大的
+        let bestWin = null;
+        let maxWinDiff = -Infinity;
+        const nonSuicidal = [];
+        const suicidalWithDiffs = [];
+
+        for (const combo of allCombos) {
+            // 模拟执行
+            P2.row = combo.move.row; P2.col = combo.move.col;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+            else vWalls[combo.wall.row][combo.wall.col] = true;
+            const ended = checkGameEnd();
+            const w = winner;
+            const diff = ended ? (countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2)) : 0;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = false;
+            else vWalls[combo.wall.row][combo.wall.col] = false;
+            gameOver = false; winner = null;
+
+            if (ended && w === 'P2') {
+                // 必胜步骤
+                if (diff > maxWinDiff) {
+                    maxWinDiff = diff;
+                    bestWin = combo;
+                }
+                continue; // 已经计入必胜，不再参与常规选择
+            }
+
+            if (ended && w !== 'P2') {
+                // 自杀步骤
+                suicidalWithDiffs.push({ combo, diff });
+                continue;
+            }
+
+            // 非结束步骤
+            nonSuicidal.push(combo);
+        }
+
+        if (bestWin) return { move: bestWin.move, wall: bestWin.wall };
+
+        // 2. 两步必杀（仅在非自杀步骤中查找）
+        let bestTwoStep = null;
+        let maxTwoStepDiff = -Infinity;
+        for (const combo of nonSuicidal) {
+            if (isTwoStepKill(combo.move, combo.wall)) {
+                const saved = cloneState();
+                P2.row = combo.move.row; P2.col = combo.move.col;
+                if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+                else vWalls[combo.wall.row][combo.wall.col] = true;
+                const diff = countRegion(P2.row, P2.col, P1) - countRegion(P1.row, P1.col, P2);
+                restoreState(saved);
+                if (diff > maxTwoStepDiff) {
+                    maxTwoStepDiff = diff;
+                    bestTwoStep = combo;
+                }
+            }
+        }
+        if (bestTwoStep) return { move: bestTwoStep.move, wall: bestTwoStep.wall };
+
+        // 3. 常规搜索（仅非自杀步骤）
+        let bestMove = null, bestWall = null, bestScore = -Infinity;
+        const saved = cloneState();
+        for (const combo of nonSuicidal) {
+            P2.row = combo.move.row; P2.col = combo.move.col;
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = true;
+            else vWalls[combo.wall.row][combo.wall.col] = true;
+            checkGameEnd();
+            const score = minimax(desiredDepth - 1, -Infinity, Infinity, false);
+            if (combo.wall.dir === 'h') hWalls[combo.wall.row][combo.wall.col] = false;
+            else vWalls[combo.wall.row][combo.wall.col] = false;
+            gameOver = false; winner = null;
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = combo.move;
+                bestWall = combo.wall;
+            }
+        }
+        restoreState(saved);
+
+        // 如果非自杀步骤为空，则从所有步骤中选负分最大（即输最少的）
+        if (!bestMove && suicidalWithDiffs.length > 0) {
+            suicidalWithDiffs.sort((a,b) => b.diff - a.diff);
+            const best = suicidalWithDiffs[0];
+            return { move: best.combo.move, wall: best.combo.wall };
+        }
+
         return { move: bestMove, wall: bestWall };
     }
 
     function getAIDepth() {
         const rand = Math.random();
         if (aiDifficulty === 'beginner') return 2;
-        if (aiDifficulty === 'intermediate') return rand < 0.1 ? 2 : 4;
-        if (aiDifficulty === 'advanced') return rand < 0.9 ? 4 : 6;
-        if (aiDifficulty === 'expert') return rand < 0.5 ? 6 : 4;
+        if (aiDifficulty === 'intermediate') return rand < 0.5 ? 4 : 2;
+        if (aiDifficulty === 'advanced') return rand < 0.5 ? 4 : 3;
+        if (aiDifficulty === 'expert') return 4;
         return 4;
     }
 
@@ -668,29 +820,47 @@
 
     document.addEventListener('keydown', (e) => {
         if (gameOver || aiThinking) return;
-        const key = e.key; e.preventDefault();
-        if (key==='Escape') { document.getElementById('pauseModal').classList.add('active'); return; }
-        if (phase==='move') {
-            if (key==='ArrowUp'||key==='w'||key==='W') cursor.row=Math.max(0,cursor.row-1);
-            else if (key==='ArrowDown'||key==='s'||key==='S') cursor.row=Math.min(SIZE-1,cursor.row+1);
-            else if (key==='ArrowLeft'||key==='a'||key==='A') cursor.col=Math.max(0,cursor.col-1);
-            else if (key==='ArrowRight'||key==='d'||key==='D') cursor.col=Math.min(SIZE-1,cursor.col+1);
-            else if (key===' ') { handleMoveConfirm(); return; }
+        const key = e.key;
+        e.preventDefault();
+        if (key === 'Escape') { document.getElementById('pauseModal').classList.add('active'); return; }
+        if (phase === 'move') {
+            if (key === 'ArrowUp' || key === 'w' || key === 'W') cursor.row = Math.max(0, cursor.row - 1);
+            else if (key === 'ArrowDown' || key === 's' || key === 'S') cursor.row = Math.min(SIZE-1, cursor.row + 1);
+            else if (key === 'ArrowLeft' || key === 'a' || key === 'A') cursor.col = Math.max(0, cursor.col - 1);
+            else if (key === 'ArrowRight' || key === 'd' || key === 'D') cursor.col = Math.min(SIZE-1, cursor.col + 1);
+            else if (key === ' ') { handleMoveConfirm(); return; }
             drawBoard();
-        } else if (phase==='wall') {
-            if (key==='r'||key==='R') { phase='move'; updateUI(); drawBoard(); return; }
-            const dirInfo = { 'ArrowUp':{dir:'h',row:-1,col:0}, 'ArrowDown':{dir:'h',row:0,col:0}, 'ArrowLeft':{dir:'v',row:0,col:-1}, 'ArrowRight':{dir:'v',row:0,col:0},
-                             'w':{dir:'h',row:-1,col:0},'W':{dir:'h',row:-1,col:0},'s':{dir:'h',row:0,col:0},'S':{dir:'h',row:0,col:0},
-                             'a':{dir:'v',row:0,col:-1},'A':{dir:'v',row:0,col:-1},'d':{dir:'v',row:0,col:0},'D':{dir:'v',row:0,col:0} }[key];
-            if (dirInfo) {
-                const r=currentPlayer.row, c=currentPlayer.col;
-                let targetRow = (dirInfo.dir==='h')? (dirInfo.row<0?r-1:r) : (dirInfo.col<0?c-1:c);
-                let targetCol = (dirInfo.dir==='h')? c : (dirInfo.col<0?c-1:c);
-                const found = validWalls.find(v=>v.row===targetRow&&v.col===targetCol&&v.dir===dirInfo.dir);
-                if (found) { wallCursor = found; drawBoard(); }
+        } else if (phase === 'wall') {
+            if (key === 'r' || key === 'R') { phase = 'move'; updateUI(); drawBoard(); return; }
+            const dirMap = {
+                'ArrowUp':   { dir:'h', dr:-1, dc: 0 },
+                'ArrowDown': { dir:'h', dr: 0, dc: 0 },
+                'ArrowLeft': { dir:'v', dr: 0, dc:-1 },
+                'ArrowRight':{ dir:'v', dr: 0, dc: 0 },
+                'w':{ dir:'h', dr:-1, dc:0 }, 'W':{ dir:'h', dr:-1, dc:0 },
+                's':{ dir:'h', dr: 0, dc:0 }, 'S':{ dir:'h', dr: 0, dc:0 },
+                'a':{ dir:'v', dr: 0, dc:-1 }, 'A':{ dir:'v', dr: 0, dc:-1 },
+                'd':{ dir:'v', dr: 0, dc: 0 }, 'D':{ dir:'v', dr: 0, dc: 0 }
+            };
+            const d = dirMap[key];
+            if (d) {
+                const r = currentPlayer.row, c = currentPlayer.col;
+                let tr, tc;
+                if (d.dir === 'h') {
+                    tr = (d.dr < 0) ? r - 1 : r;
+                    tc = c;
+                } else {
+                    tr = r;
+                    tc = (d.dc < 0) ? c - 1 : c;
+                }
+                const found = validWalls.find(v => v.row === tr && v.col === tc && v.dir === d.dir);
+                if (found) {
+                    wallCursor = found;
+                    drawBoard();
+                }
                 return;
             }
-            if (key===' ') { handleWallConfirm(); return; }
+            if (key === ' ') { handleWallConfirm(); return; }
         }
     });
 
