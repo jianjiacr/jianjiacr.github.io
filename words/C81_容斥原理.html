@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英语单词表（带发音）</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        body {
+            background: #f0f4f8;
+            padding: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h2 {
+            text-align: center;
+            color: #222;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        .control-panel {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            padding: 10px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .control-panel select, .control-panel input {
+            margin: 0 8px;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .reset-btn {
+            padding: 4px 12px;
+            border: 1px solid #367bfa;
+            border-radius: 4px;
+            background: #fff;
+            color: #367bfa;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .reset-btn:hover {
+            background: #367bfa;
+            color: #fff;
+        }
+        .word-box {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .table-head {
+            display: grid;
+            grid-template-columns: 1fr 1fr 80px;
+            background: #367bfa;
+            color: #fff;
+            padding: 15px 20px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .word-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 80px;
+            padding: 14px 20px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+            font-size: 16px;
+        }
+        .word-row:last-child {
+            border-bottom: none;
+        }
+        .en-word {
+            color: #2c3e50;
+            font-weight: 500;
+        }
+        .cn-mean {
+            color: #555;
+        }
+        .voice-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: #e8f0fe;
+            color: #367bfa;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.2s;
+            margin: 0 auto;
+        }
+        .voice-btn:hover {
+            background: #367bfa;
+            color: #fff;
+        }
+        .voice-btn.playing {
+            background: #fa3636;
+            color: #fff;
+        }
+        .word-row:hover {
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <h2>英语词汇表</h2>
+
+    <div class="control-panel">
+        <label>发音类型：</label>
+        <select id="langSelect">
+            <option value="en-US">美式英语</option>
+            <option value="en-GB">英式英语</option>
+        </select>
+        <label>语速：</label>
+        <input type="range" id="rateInput" min="0.5" max="2" step="0.1" value="1">
+        <button class="reset-btn" onclick="resetRate()">恢复标准语速</button>
+    </div>
+
+    <div class="word-box">
+        <div class="table-head">
+            <div>英文单词/短语</div>
+            <div>中文释义</div>
+            <div>发音</div>
+        </div>
+        <div class="word-row"><div class="en-word">overlap</div><div class="cn-mean">重叠</div><button class="voice-btn" onclick="readWord('overlap', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">land</div><div class="cn-mean">陆地</div><button class="voice-btn" onclick="readWord('land', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">aquatic</div><div class="cn-mean">水生的</div><button class="voice-btn" onclick="readWord('aquatic', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">both</div><div class="cn-mean">两者都是</div><button class="voice-btn" onclick="readWord('both', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">only</div><div class="cn-mean">只有，仅</div><button class="voice-btn" onclick="readWord('only', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">either ... or...</div><div class="cn-mean">要么...要么...</div><button class="voice-btn" onclick="readWord('either or', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">neither ... nor...</div><div class="cn-mean">不...也不</div><button class="voice-btn" onclick="readWord('neither nor', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">sedan</div><div class="cn-mean">轿车</div><button class="voice-btn" onclick="readWord('sedan', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">include</div><div class="cn-mean">包括</div><button class="voice-btn" onclick="readWord('include', this)">🔊</button></div>
+        <div class="word-row"><div class="en-word">exclude</div><div class="cn-mean">排除</div><button class="voice-btn" onclick="readWord('exclude', this)">🔊</button></div>
+    </div>
+
+    <script>
+        let isPlaying = false;
+        let currentBtn = null;
+        let voices = [];
+
+        if (!window.speechSynthesis) {
+            alert("您的浏览器不支持语音朗读功能，请更换Chrome/Edge浏览器");
+        }
+
+        function loadVoices() {
+            voices = window.speechSynthesis.getVoices();
+        }
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+
+        function readWord(text, btn) {
+            if (isPlaying) {
+                window.speechSynthesis.cancel();
+                if (currentBtn) currentBtn.classList.remove("playing");
+                isPlaying = false;
+                return;
+            }
+            const lang = document.getElementById("langSelect").value;
+            const rate = parseFloat(document.getElementById("rateInput").value);
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = lang;
+            utterance.rate = rate;
+            utterance.volume = 1;
+            const bestVoice = voices.find(voice => voice.lang === lang) || voices[0];
+            if (bestVoice) utterance.voice = bestVoice;
+            isPlaying = true;
+            currentBtn = btn;
+            btn.classList.add("playing");
+            utterance.onend = function () {
+                isPlaying = false;
+                btn.classList.remove("playing");
+            };
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function resetRate() {
+            document.getElementById("rateInput").value = 1;
+        }
+    </script>
+</body>
+</html>
